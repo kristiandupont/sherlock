@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Clue } from "../model/types";
 import { ClueCard } from "./ClueCard";
 import { cardSize, type Point } from "./clueLayout";
@@ -10,6 +10,8 @@ type Props = {
   /** Called once a drag finishes, not on every pointer move. */
   onMove: (index: number, point: Point) => void;
   onToggleUsed: (index: number) => void;
+  /** Index of the clue the hint points at, ringed and scrolled into view. */
+  highlight: number | null;
 };
 
 type Drag = {
@@ -23,7 +25,7 @@ type Drag = {
 
 const DRAG_THRESHOLD = 4;
 
-export function ClueCanvas({ clues, positions, used, onMove, onToggleUsed }: Props) {
+export function ClueCanvas({ clues, positions, used, onMove, onToggleUsed, highlight }: Props) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const [order, setOrder] = useState<number[]>(() => clues.map((_, i) => i));
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -42,6 +44,13 @@ export function ClueCanvas({ clues, positions, used, onMove, onToggleUsed }: Pro
     });
     return { width: width + 24, height: height + 24 };
   }, [clues, positions]);
+
+  useEffect(() => {
+    if (highlight === null) return;
+    surfaceRef.current
+      ?.querySelector(`[data-clue-index="${highlight}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  }, [highlight]);
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, index: number) => {
@@ -107,10 +116,14 @@ export function ClueCanvas({ clues, positions, used, onMove, onToggleUsed }: Pro
         {clues.map((clue, index) => {
           const point = positionOf(index);
           const dragging = drag?.index === index && drag.moved;
+          const hinted = highlight === index;
           return (
             <div
               key={index}
-              className={`absolute touch-none ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+              data-clue-index={index}
+              className={`absolute touch-none ${dragging ? "cursor-grabbing" : "cursor-grab"} ${
+                hinted ? "hint-ring rounded-lg" : ""
+              }`}
               style={{
                 left: point.x,
                 top: point.y,
@@ -127,7 +140,7 @@ export function ClueCanvas({ clues, positions, used, onMove, onToggleUsed }: Pro
                 onToggleUsed(index);
               }}
             >
-              <ClueCard clue={clue} used={used[index] ?? false} />
+              <ClueCard clue={clue} used={(used[index] ?? false) && !hinted} />
             </div>
           );
         })}

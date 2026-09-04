@@ -7,6 +7,7 @@ import {
   removeCandidate,
   type BoardState,
 } from "./game/board";
+import { findHints } from "./game/hint";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
 import { Board, type InteractionMode } from "./ui/Board";
@@ -71,6 +72,9 @@ export default function App() {
   const [game, setGame] = useState<Game>(() => loadGame() ?? startGame("medium"));
   const [mode, setMode] = useState<InteractionMode>("place");
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
+  const [hint, setHint] = useState<{ clueIndex: number | null; message: string } | null>(null);
+  /** Advances on each Hint press so repeats cycle through the other clues. */
+  const [hintCursor, setHintCursor] = useState(0);
   const [showLegend, setShowLegend] = useState(false);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -117,6 +121,8 @@ export default function App() {
 
   const pushBoard = useCallback((next: BoardState) => {
     setFlagged(new Set());
+    setHint(null);
+    setHintCursor(0);
     setGame((current) =>
       next === current.history[current.history.length - 1]
         ? current
@@ -136,18 +142,50 @@ export default function App() {
         : { ...current, history: current.history.slice(0, -1) },
     );
 
-  const restart = () => {
+  const clearNotices = () => {
     setFlagged(new Set());
+    setHint(null);
+    setHintCursor(0);
+  };
+
+  const restart = () => {
+    clearNotices();
     setGame((current) => ({ ...current, history: [emptyBoard(current.puzzle.size)] }));
   };
 
   const newGame = (difficulty: Difficulty) => {
-    setFlagged(new Set());
+    clearNotices();
     setGame(startGame(difficulty));
   };
 
   const check = () => {
     setFlagged(new Set(mistakes(board, game.puzzle.solution).map(([r, c]) => `${r}:${c}`)));
+  };
+
+  /**
+   * Rings a clue that still narrows the grid, and says nothing about what it
+   * narrows. Pressing again moves to the next-best clue.
+   */
+  const showHint = () => {
+    const hints = findHints(board, game.puzzle.clues, game.used);
+    if (hints.length === 0) {
+      setHint({
+        clueIndex: null,
+        message: solved
+          ? "Nothing left to work out."
+          : "No clue narrows the grid any further, which means something has been ruled out wrongly. Try Check.",
+      });
+      return;
+    }
+    const pick = hints[hintCursor % hints.length];
+    setHintCursor((cursor) => cursor + 1);
+    setHint({
+      clueIndex: pick.clueIndex,
+      message:
+        hints.length > 1
+          ? "This clue still narrows the grid. Press Hint again for a different one."
+          : "This clue still narrows the grid.",
+    });
   };
 
   const arrange = (grouped: boolean) =>
@@ -198,6 +236,7 @@ export default function App() {
         </Button>
         <Button onClick={restart}>Restart</Button>
         <Button onClick={check}>Check</Button>
+        <Button onClick={showHint}>Hint</Button>
 
         <span className="mx-1 h-5 w-px bg-slate-200" />
         <Button onClick={() => arrange(false)}>Tidy clues</Button>
@@ -244,6 +283,11 @@ export default function App() {
               Solved. Every column is settled.
             </p>
           )}
+          {hint && (
+            <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {hint.message}
+            </p>
+          )}
           {flagged.size > 0 && (
             <p className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800">
               {flagged.size} cell{flagged.size === 1 ? "" : "s"} rule out the symbol that belongs
@@ -260,6 +304,7 @@ export default function App() {
             used={game.used}
             onMove={moveClue}
             onToggleUsed={toggleUsed}
+            highlight={hint?.clueIndex ?? null}
           />
         </section>
       </main>

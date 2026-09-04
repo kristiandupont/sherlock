@@ -7,3 +7,18 @@ html,
 #root {
   height: 100%;
 }
+
+/* Ring drawn around the clue a hint points at. */
+@keyframes hint-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgb(245 158 11 / 0.9);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgb(245 158 11 / 0.25);
+  }
+}
+
+.hint-ring {
+  animation: hint-ring 1.3s ease-in-out infinite;
+}

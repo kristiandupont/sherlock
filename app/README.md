@@ -55,11 +55,34 @@ resulting clue count:
 | medium | 20–25 | ~20% |
 | hard | 17–22 | ~43% |
 
+## Check and Hint
+
+**Check** compares the grid against the stored solution and flags every cell
+where the symbol that belongs there has been ruled out. It is an oracle: it
+reads the answer rather than reasoning about it.
+
+**Hint** does not. It asks the solver which clues still say something about the
+grid as it stands — a clue qualifies when applying it would remove at least one
+candidate the player has not removed already — and rings the best one. It never
+says what the clue implies, or where. Pressing again moves to the next-best
+clue. Ranking prefers clues that settle a cell outright over ones that only
+narrow candidates, and leaves clues the player has greyed out until last.
+
+`findHints` in `src/game/hint.ts` calls the same `applyClue` the solver uses, so
+a hint cannot disagree with the solver about what a clue means. The tests solve
+every generated puzzle by following nothing but its own hints.
+
+Note that a hint being available is no promise that the grid so far is correct:
+a wrong elimination in one row leaves clues about the other rows still saying
+plenty. Only Check answers that question. Hints run out entirely when no clue
+can act at all, which on an unfinished grid does mean something has gone wrong.
+
 ## Layout
 
 - `src/model/` — types, bit helpers, the solver, and the generator. No React.
 - `src/game/board.ts` — the player's grid state. It applies the bookkeeping that
   follows from the shape of the grid, and never reasons from clues.
+- `src/game/hint.ts` — ranks the clues that still narrow the grid.
 - `src/ui/` — tile artwork, the board, the clue cards, and the canvas.
 - `src/App.tsx` — controls, undo history, and saving to `localStorage`. A saved
   game stores only the seed and difficulty, because a puzzle is reproducible

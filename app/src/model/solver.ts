@@ -38,15 +38,142 @@ export const openPositions = (size: number): PosMask =>
  * unique — and it does so without ever guessing, which means a player can
  * reproduce the same reasoning.
  */
+/** What applying one rule did to the board. */
+export type RuleEffect = "unchanged" | "changed" | "contradiction";
+
+/**
+ * Applies a single clue to `pos`. Split out from `propagate` so that the hint
+ * finder asks the same question the solver does — "what does this one clue
+ * settle right now?" — against the same rules.
+ */
+export function applyClue(pos: PosMask, clue: Clue, size: number): RuleEffect {
+  const full = fullMask(size);
+  const up2 = (mask: number) => (mask << 2) & full;
+  const down2 = (mask: number) => mask >> 2;
+
+  switch (clue.kind) {
+    case "same-column": {
+      const a = tileId(clue.a, size);
+      const b = tileId(clue.b, size);
+      const shared = pos[a] & pos[b];
+      if (shared === 0) return "contradiction";
+      if (pos[a] === shared && pos[b] === shared) return "unchanged";
+      pos[a] = shared;
+      pos[b] = shared;
+      return "changed";
+    }
+    case "different-column": {
+      const a = tileId(clue.a, size);
+      const b = tileId(clue.b, size);
+      let changed = false;
+      // Only informative once one side is pinned to a single column.
+      if (isSingle(pos[a]) && pos[b] & pos[a]) {
+        pos[b] &= ~pos[a];
+        if (pos[b] === 0) return "contradiction";
+        changed = true;
+      }
+      if (isSingle(pos[b]) && pos[a] & pos[b]) {
+        pos[a] &= ~pos[b];
+        if (pos[a] === 0) return "contradiction";
+        changed = true;
+      }
+      return changed ? "changed" : "unchanged";
+    }
+    case "adjacent": {
+      const a = tileId(clue.a, size);
+      const b = tileId(clue.b, size);
+      const na = pos[a] & neighbours(pos[b], size);
+      const nb = pos[b] & neighbours(pos[a], size);
+      if (na === 0 || nb === 0) return "contradiction";
+      if (na === pos[a] && nb === pos[b]) return "unchanged";
+      pos[a] = na;
+      pos[b] = nb;
+      return "changed";
+    }
+    case "left-of": {
+      const l = tileId(clue.left, size);
+      const r = tileId(clue.right, size);
+      const nl = pos[r] === 0 ? 0 : pos[l] & bitsBelow(highestBit(pos[r]));
+      const nr = pos[l] === 0 ? 0 : pos[r] & bitsAbove(lowestBit(pos[l]), size);
+      if (nl === 0 || nr === 0) return "contradiction";
+      if (nl === pos[l] && nr === pos[r]) return "unchanged";
+      pos[l] = nl;
+      pos[r] = nr;
+      return "changed";
+    }
+    case "between": {
+      const m = tileId(clue.middle, size);
+      const a = tileId(clue.a, size);
+      const b = tileId(clue.b, size);
+      const A = pos[a];
+      const B = pos[b];
+      const M = pos[m];
+      // `a` left of `middle` and `b` right of it, or the mirror image.
+      const nm = M & ((shiftUp(A, size) & shiftDown(B)) | (shiftUp(B, size) & shiftDown(A)));
+      const na = A & ((shiftDown(M) & down2(B)) | (shiftUp(M, size) & up2(B)));
+      const nb = B & ((shiftDown(M) & down2(A)) | (shiftUp(M, size) & up2(A)));
+      if (nm === 0 || na === 0 || nb === 0) return "contradiction";
+      if (nm === M && na === A && nb === B) return "unchanged";
+      pos[m] = nm;
+      pos[a] = na;
+      pos[b] = nb;
+      return "changed";
+    }
+  }
+}
+
+/**
+ * The two rules that follow from the shape of the grid rather than from any
+ * clue: a tile pinned to a column takes it from its row-mates, and a column
+ * left open to only one tile of a row belongs to that tile.
+ */
+export function applyGridRules(pos: PosMask, size: number): RuleEffect {
+  let changed = false;
+  for (let row = 0; row < size; row++) {
+    const base = row * size;
+    for (let t = 0; t < size; t++) {
+      const mask = pos[base + t];
+      if (mask === 0) return "contradiction";
+      if (!isSingle(mask)) continue;
+      for (let u = 0; u < size; u++) {
+        if (u === t || !(pos[base + u] & mask)) continue;
+        pos[base + u] &= ~mask;
+        if (pos[base + u] === 0) return "contradiction";
+        changed = true;
+      }
+    }
+    for (let col = 0; col < size; col++) {
+      const colBit = 1 << col;
+      let count = 0;
+      let last = -1;
+      for (let t = 0; t < size; t++) {
+        if (pos[base + t] & colBit) {
+          count++;
+          last = base + t;
+        }
+      }
+      if (count === 0) return "contradiction";
+      if (count === 1 && pos[last] !== colBit) {
+        pos[last] = colBit;
+        changed = true;
+      }
+    }
+  }
+  return changed ? "changed" : "unchanged";
+}
+
+/**
+ * Narrows `pos` by repeatedly applying every clue plus the two structural rules
+ * of the grid, until nothing changes. Every rule only removes columns that no
+ * valid solution could use, so a run that pins all tiles proves the solution is
+ * unique — and it does so without ever guessing, which means a player can
+ * reproduce the same reasoning.
+ */
 export function propagate(
   pos: PosMask,
   clues: Clue[],
   size: number,
 ): { ok: boolean; passes: number } {
-  const full = fullMask(size);
-  const up2 = (mask: number) => (mask << 2) & full;
-  const down2 = (mask: number) => mask >> 2;
-
   let changed = true;
   let passes = 0;
 
@@ -55,115 +182,14 @@ export function propagate(
     passes++;
 
     for (const clue of clues) {
-      switch (clue.kind) {
-        case "same-column": {
-          const a = tileId(clue.a, size);
-          const b = tileId(clue.b, size);
-          const shared = pos[a] & pos[b];
-          if (shared === 0) return { ok: false, passes };
-          if (pos[a] !== shared || pos[b] !== shared) {
-            pos[a] = shared;
-            pos[b] = shared;
-            changed = true;
-          }
-          break;
-        }
-        case "different-column": {
-          const a = tileId(clue.a, size);
-          const b = tileId(clue.b, size);
-          // Only informative once one side is pinned to a single column.
-          if (isSingle(pos[a]) && pos[b] & pos[a]) {
-            pos[b] &= ~pos[a];
-            if (pos[b] === 0) return { ok: false, passes };
-            changed = true;
-          }
-          if (isSingle(pos[b]) && pos[a] & pos[b]) {
-            pos[a] &= ~pos[b];
-            if (pos[a] === 0) return { ok: false, passes };
-            changed = true;
-          }
-          break;
-        }
-        case "adjacent": {
-          const a = tileId(clue.a, size);
-          const b = tileId(clue.b, size);
-          const na = pos[a] & neighbours(pos[b], size);
-          const nb = pos[b] & neighbours(pos[a], size);
-          if (na === 0 || nb === 0) return { ok: false, passes };
-          if (na !== pos[a] || nb !== pos[b]) {
-            pos[a] = na;
-            pos[b] = nb;
-            changed = true;
-          }
-          break;
-        }
-        case "left-of": {
-          const l = tileId(clue.left, size);
-          const r = tileId(clue.right, size);
-          const nl = pos[r] === 0 ? 0 : pos[l] & bitsBelow(highestBit(pos[r]));
-          const nr = pos[l] === 0 ? 0 : pos[r] & bitsAbove(lowestBit(pos[l]), size);
-          if (nl === 0 || nr === 0) return { ok: false, passes };
-          if (nl !== pos[l] || nr !== pos[r]) {
-            pos[l] = nl;
-            pos[r] = nr;
-            changed = true;
-          }
-          break;
-        }
-        case "between": {
-          const m = tileId(clue.middle, size);
-          const a = tileId(clue.a, size);
-          const b = tileId(clue.b, size);
-          const A = pos[a];
-          const B = pos[b];
-          const M = pos[m];
-          // `a` left of `middle` and `b` right of it, or the mirror image.
-          const nm = M & ((shiftUp(A, size) & shiftDown(B)) | (shiftUp(B, size) & shiftDown(A)));
-          const na = A & ((shiftDown(M) & down2(B)) | (shiftUp(M, size) & up2(B)));
-          const nbm = B & ((shiftDown(M) & down2(A)) | (shiftUp(M, size) & up2(A)));
-          if (nm === 0 || na === 0 || nbm === 0) return { ok: false, passes };
-          if (nm !== M || na !== A || nbm !== B) {
-            pos[m] = nm;
-            pos[a] = na;
-            pos[b] = nbm;
-            changed = true;
-          }
-          break;
-        }
-      }
+      const effect = applyClue(pos, clue, size);
+      if (effect === "contradiction") return { ok: false, passes };
+      if (effect === "changed") changed = true;
     }
 
-    for (let row = 0; row < size; row++) {
-      const base = row * size;
-      // A tile pinned to a column takes that column away from its row-mates.
-      for (let t = 0; t < size; t++) {
-        const mask = pos[base + t];
-        if (mask === 0) return { ok: false, passes };
-        if (!isSingle(mask)) continue;
-        for (let u = 0; u < size; u++) {
-          if (u === t || !(pos[base + u] & mask)) continue;
-          pos[base + u] &= ~mask;
-          changed = true;
-        }
-      }
-      // A column left open to only one tile of a row belongs to that tile.
-      for (let col = 0; col < size; col++) {
-        const colBit = 1 << col;
-        let count = 0;
-        let last = -1;
-        for (let t = 0; t < size; t++) {
-          if (pos[base + t] & colBit) {
-            count++;
-            last = base + t;
-          }
-        }
-        if (count === 0) return { ok: false, passes };
-        if (count === 1 && pos[last] !== colBit) {
-          pos[last] = colBit;
-          changed = true;
-        }
-      }
-    }
+    const grid = applyGridRules(pos, size);
+    if (grid === "contradiction") return { ok: false, passes };
+    if (grid === "changed") changed = true;
   }
 
   return { ok: true, passes };

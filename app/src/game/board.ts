@@ -106,6 +106,30 @@ export function mistakes(board: BoardState, solution: Solution): Array<[number, 
 export const isSolved = (board: BoardState, solution: Solution): boolean =>
   isComplete(board) && mistakes(board, solution).length === 0;
 
+/**
+ * The solver works per tile ("which columns are still open to it"), the board
+ * per cell ("which tiles are still possible here"). These are transposes of one
+ * another.
+ */
+export function boardToPositions(board: BoardState): Int32Array {
+  const { size } = board;
+  const pos = new Int32Array(size * size);
+  for (let row = 0; row < size; row++)
+    for (let col = 0; col < size; col++)
+      for (let tile = 0; tile < size; tile++)
+        if (board.cells[row][col] & bit(tile)) pos[row * size + tile] |= bit(col);
+  return pos;
+}
+
+export function positionsToBoard(pos: Int32Array, size: number): BoardState {
+  const cells = Array.from({ length: size }, () => new Array<number>(size).fill(0));
+  for (let row = 0; row < size; row++)
+    for (let tile = 0; tile < size; tile++)
+      for (let col = 0; col < size; col++)
+        if (pos[row * size + tile] & bit(col)) cells[row][col] |= bit(tile);
+  return { size, cells };
+}
+
 export function boardFromSolution(solution: Solution): BoardState {
   const size = solution.length;
   return {
