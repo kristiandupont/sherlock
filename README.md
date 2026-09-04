@@ -1,5 +1,7 @@
 # Sherlock
 
+**[Play it here](https://kristiandupont.github.io/sherlock/)**
+
 A browser version of the deduction puzzle. A 6×6 grid holds six rows of six
 symbols; every column contains exactly one symbol from each row. Clues say how
 the symbols relate across columns, and the grid is worked out from them alone.
@@ -9,17 +11,28 @@ card on a freeform canvas: drag it anywhere, put a same-column clue next to the
 adjacency clue it interacts with, and click a card to grey it out once it has
 been used.
 
+The app lives in [`app/`](app):
+
 ```
+cd app
 npm install
 npm run dev      # play at http://localhost:5173
 npm test         # solver, generator and board tests
 npm run build
 ```
 
+Every push to `main` builds the app and publishes it to GitHub Pages; see
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The workflow
+runs the lint and the tests first, so a failing test stops the deployment.
+
+Because a project page is served from `/sherlock/` rather than the domain root,
+`app/vite.config.ts` sets Vite's `base` for builds. That value has to match the
+repository name.
+
 ## How a puzzle is generated
 
 Generation never searches for a clue set. It starts from a set that is known to
-work and shrinks it, in `src/model/generate.ts`:
+work and shrinks it, in `app/src/model/generate.ts`:
 
 1. Pick a random solution — an independent permutation of tiles per row.
 2. Enumerate every clue of every kind that is true for that solution. For a 6×6
@@ -28,7 +41,7 @@ work and shrinks it, in `src/model/generate.ts`:
    at a time, keeping each removal only while the puzzle still solves. The
    result is irreducible: no remaining clue can be dropped.
 
-The test used in step 3 is `solveByDeduction` in `src/model/solver.ts`, which is
+The test used in step 3 is `solveByDeduction` in `app/src/model/solver.ts`, which is
 pure constraint propagation with no guessing. Each tile holds a bitmask of the
 columns still open to it, and every clue kind is a rule that narrows those
 masks; the two structural rules of the grid are applied alongside them until
@@ -68,7 +81,7 @@ says what the clue implies, or where. Pressing again moves to the next-best
 clue. Ranking prefers clues that settle a cell outright over ones that only
 narrow candidates, and leaves clues the player has greyed out until last.
 
-`findHints` in `src/game/hint.ts` calls the same `applyClue` the solver uses, so
+`findHints` in `app/src/game/hint.ts` calls the same `applyClue` the solver uses, so
 a hint cannot disagree with the solver about what a clue means. The tests solve
 every generated puzzle by following nothing but its own hints.
 
@@ -82,7 +95,7 @@ can act at all, which on an unfinished grid does mean something has gone wrong.
 The player's moves only ever remove candidates, so once a symbol that belongs
 somewhere has been ruled out, every later board in the history has that mistake
 too. The history is therefore a run of correct boards followed by a run of
-broken ones, and `src/game/history.ts` finds the boundary. Going back is a
+broken ones, and `app/src/game/history.ts` finds the boundary. Going back is a
 truncation of the history array, which leaves undo working on what remains.
 
 A wrong move is not reported when it happens — that would amount to a hint on
@@ -105,14 +118,14 @@ detector and would defeat the delay.
 
 ## Layout
 
-- `src/model/` — types, bit helpers, the solver, and the generator. No React.
-- `src/game/board.ts` — the player's grid state. It applies the bookkeeping that
+- `app/src/model/` — types, bit helpers, the solver, and the generator. No React.
+- `app/src/game/board.ts` — the player's grid state. It applies the bookkeeping that
   follows from the shape of the grid, and never reasons from clues.
-- `src/game/hint.ts` — ranks the clues that still narrow the grid.
-- `src/game/history.ts` — finds the move that broke the grid, and rewinds to
+- `app/src/game/hint.ts` — ranks the clues that still narrow the grid.
+- `app/src/game/history.ts` — finds the move that broke the grid, and rewinds to
   just before it.
-- `src/ui/` — tile artwork, the board, the clue cards, and the canvas.
-- `src/App.tsx` — controls, undo history, and saving to `localStorage`. A saved
+- `app/src/ui/` — tile artwork, the board, the clue cards, and the canvas.
+- `app/src/App.tsx` — controls, undo history, and saving to `localStorage`. A saved
   game stores the seed, the difficulty and every board of the history; the
   puzzle itself is reproducible from the first two, and the history is what
   keeps undo and the rewind working across a reload.
