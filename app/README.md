@@ -77,13 +77,42 @@ a wrong elimination in one row leaves clues about the other rows still saying
 plenty. Only Check answers that question. Hints run out entirely when no clue
 can act at all, which on an unfinished grid does mean something has gone wrong.
 
+## Going back after a wrong move
+
+The player's moves only ever remove candidates, so once a symbol that belongs
+somewhere has been ruled out, every later board in the history has that mistake
+too. The history is therefore a run of correct boards followed by a run of
+broken ones, and `src/game/history.ts` finds the boundary. Going back is a
+truncation of the history array, which leaves undo working on what remains.
+
+A wrong move is not reported when it happens — that would amount to a hint on
+every move. Instead:
+
+1. The notice waits a random two to four further moves.
+2. It then fades in over 18 seconds.
+
+So the player learns that something is wrong without learning which move did it,
+and without spending twenty minutes on a grid that cannot be solved.
+
+The notice element is always in the document; only its opacity and visibility
+change. Mounting it on the wrong move resized the left column and moved the clue
+canvas, which announced the notice a beat before its text was readable. The
+column also carries a fixed width, so no message can stretch it.
+
+The way back is offered only inside that notice, or alongside a Check the player
+asked for. A permanently visible "go back" button would be an instant mistake
+detector and would defeat the delay.
+
 ## Layout
 
 - `src/model/` — types, bit helpers, the solver, and the generator. No React.
 - `src/game/board.ts` — the player's grid state. It applies the bookkeeping that
   follows from the shape of the grid, and never reasons from clues.
 - `src/game/hint.ts` — ranks the clues that still narrow the grid.
+- `src/game/history.ts` — finds the move that broke the grid, and rewinds to
+  just before it.
 - `src/ui/` — tile artwork, the board, the clue cards, and the canvas.
 - `src/App.tsx` — controls, undo history, and saving to `localStorage`. A saved
-  game stores only the seed and difficulty, because a puzzle is reproducible
-  from those two values.
+  game stores the seed, the difficulty and every board of the history; the
+  puzzle itself is reproducible from the first two, and the history is what
+  keeps undo and the rewind working across a reload.

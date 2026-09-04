@@ -8,6 +8,7 @@ import {
   type BoardState,
 } from "./game/board";
 import { findHints } from "./game/hint";
+import { firstBrokenIndex, movesSinceBroken, rewindToLastGood } from "./game/history";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
 import { Board, type InteractionMode } from "./ui/Board";
@@ -16,7 +17,17 @@ import { Legend } from "./ui/Legend";
 import { layoutClues, layoutCluesByKind, type Point } from "./ui/clueLayout";
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
-const STORAGE_KEY = "sherlock:game:v1";
+const STORAGE_KEY = "sherlock:game:v2";
+
+/**
+ * A wrong move is not reported straight away — that would amount to a hint on
+ * every move. Instead the notice waits a random two to four further moves, then
+ * fades in over `NOTICE_FADE_SECONDS`, so the player learns that something is
+ * wrong without learning which move did it.
+ */
+const NOTICE_GRACE_MOVES = [2, 3, 4];
+const REWIND_HINT = "Return to the last position that had no mistakes";
+const NOTICE_FADE_SECONDS = 18;
 
 type Game = {
   difficulty: Difficulty;
@@ -31,7 +42,8 @@ type Saved = {
   difficulty: Difficulty;
   seed: number;
   size: number;
-  cells: number[][];
+  /** Every board of the history, oldest first, so undo and rewind survive a reload. */
+  history: number[][][];
   positions: Point[];
   used: boolean[];
 };
@@ -56,10 +68,11 @@ function loadGame(): Game | null {
     if (!DIFFICULTIES.includes(saved.difficulty)) return null;
     const puzzle = generatePuzzle({ seed: saved.seed, difficulty: saved.difficulty, size: saved.size });
     if (puzzle.seed !== saved.seed || puzzle.clues.length !== saved.used.length) return null;
+    if (!Array.isArray(saved.history) || saved.history.length === 0) return null;
     return {
       difficulty: saved.difficulty,
       puzzle,
-      history: [{ size: saved.size, cells: saved.cells }],
+      history: saved.history.map((cells) => ({ size: saved.size, cells })),
       positions: saved.positions,
       used: saved.used,
     };
@@ -75,6 +88,9 @@ export default function App() {
   const [hint, setHint] = useState<{ clueIndex: number | null; message: string } | null>(null);
   /** Advances on each Hint press so repeats cycle through the other clues. */
   const [hintCursor, setHintCursor] = useState(0);
+  /** Moves to let pass before the wrong-turn notice starts appearing. */
+  const [grace, setGrace] = useState<number | null>(null);
+  const [noticeVisible, setNoticeVisible] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -82,6 +98,38 @@ export default function App() {
   const board = game.history[game.history.length - 1];
   const solved = useMemo(() => isSolved(board, game.puzzle.solution), [board, game.puzzle]);
   const stats = useMemo(() => puzzleStats(game.puzzle), [game.puzzle]);
+  const brokenIndex = useMemo(
+    () => firstBrokenIndex(game.history, game.puzzle.solution),
+    [game.history, game.puzzle],
+  );
+  const sinceBroken = useMemo(
+    () => movesSinceBroken(game.history, game.puzzle.solution),
+    [game.history, game.puzzle],
+  );
+  const warnWrongTurn = brokenIndex >= 0 && grace !== null && sinceBroken >= grace;
+
+  // The grace period is drawn once per wrong turn, and forgotten as soon as the
+  // grid is correct again.
+  useEffect(() => {
+    if (brokenIndex < 0) {
+      setGrace(null);
+      return;
+    }
+    setGrace(
+      (previous) =>
+        previous ?? NOTICE_GRACE_MOVES[Math.floor(Math.random() * NOTICE_GRACE_MOVES.length)],
+    );
+  }, [brokenIndex]);
+
+  // Mounted at zero opacity, then transitioned up on the next frame.
+  useEffect(() => {
+    if (!warnWrongTurn) {
+      setNoticeVisible(false);
+      return;
+    }
+    const frame = requestAnimationFrame(() => setNoticeVisible(true));
+    return () => cancelAnimationFrame(frame);
+  }, [warnWrongTurn]);
 
   useEffect(() => {
     const element = canvasRef.current;
@@ -108,7 +156,7 @@ export default function App() {
       difficulty: game.difficulty,
       seed: game.puzzle.seed,
       size: game.puzzle.size,
-      cells: board.cells,
+      history: game.history.map((state) => state.cells),
       positions: game.positions,
       used: game.used,
     };
@@ -117,7 +165,7 @@ export default function App() {
     } catch {
       // A full or blocked store just means the game is not resumable.
     }
-  }, [game, board]);
+  }, [game]);
 
   const pushBoard = useCallback((next: BoardState) => {
     setFlagged(new Set());
@@ -160,6 +208,15 @@ export default function App() {
 
   const check = () => {
     setFlagged(new Set(mistakes(board, game.puzzle.solution).map(([r, c]) => `${r}:${c}`)));
+  };
+
+  /** Drops every board built on top of the wrong move. */
+  const rewind = () => {
+    clearNotices();
+    setGame((current) => ({
+      ...current,
+      history: rewindToLastGood(current.history, current.puzzle.solution),
+    }));
   };
 
   /**
@@ -268,8 +325,8 @@ export default function App() {
       )}
 
       <main className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:flex-row">
-        <section className="flex shrink-0 flex-col gap-2">
-          <div className="w-full max-w-[520px] rounded-lg border border-slate-200 bg-white p-3 lg:w-[520px]">
+        <section className="flex w-full shrink-0 flex-col gap-2 lg:w-[520px]">
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
             <Board
               board={board}
               mode={mode}
@@ -289,11 +346,36 @@ export default function App() {
             </p>
           )}
           {flagged.size > 0 && (
-            <p className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-              {flagged.size} cell{flagged.size === 1 ? "" : "s"} rule out the symbol that belongs
-              there.
-            </p>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+              <span>
+                {flagged.size} cell{flagged.size === 1 ? "" : "s"} rule out the symbol that belongs
+                there.
+              </span>
+              <Button onClick={rewind} title={REWIND_HINT}>
+                Go back
+              </Button>
+            </div>
           )}
+
+          {/*
+            The notice is always in the document and only its opacity changes.
+            Mounting it on the wrong move would resize the column and announce
+            itself a beat before the text became readable.
+          */}
+          <div
+            className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+            style={{
+              opacity: noticeVisible ? 1 : 0,
+              visibility: warnWrongTurn ? "visible" : "hidden",
+              transition: `opacity ${NOTICE_FADE_SECONDS}s linear`,
+            }}
+            aria-hidden={!warnWrongTurn}
+          >
+            <span>Something in this grid has gone wrong.</span>
+            <Button onClick={rewind} title={REWIND_HINT}>
+              Go back
+            </Button>
+          </div>
         </section>
 
         <section ref={canvasRef} className="min-h-[320px] min-w-0 flex-1">
@@ -316,16 +398,19 @@ function Button({
   children,
   onClick,
   disabled,
+  title,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className="rounded border border-slate-300 bg-white px-2.5 py-1 text-sm text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
     >
       {children}

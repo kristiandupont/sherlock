@@ -94,6 +94,14 @@ export const placedTile = (board: BoardState, row: number, col: number): number 
 export const isComplete = (board: BoardState): boolean =>
   board.cells.every((row) => row.every(isSingle));
 
+/** Whether any cell has ruled out the tile that belongs there. Stops at the first. */
+export function hasMistake(board: BoardState, solution: Solution): boolean {
+  for (let row = 0; row < board.size; row++)
+    for (let col = 0; col < board.size; col++)
+      if (!(board.cells[row][col] & bit(solution[row][col]))) return true;
+  return false;
+}
+
 /** Cells where the player has ruled out the tile that actually belongs there. */
 export function mistakes(board: BoardState, solution: Solution): Array<[number, number]> {
   const out: Array<[number, number]> = [];
