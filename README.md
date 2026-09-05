@@ -113,21 +113,24 @@ broken ones, and `app/src/game/history.ts` finds the boundary. Going back is a
 truncation of the history array, which leaves undo working on what remains.
 
 A wrong move is not reported when it happens — that would amount to a hint on
-every move. Instead:
+every move. The notice instead starts fading in the moment the grid goes wrong
+and takes 25 seconds to arrive, staying imperceptible for the first several of
+them. So the player learns that something is wrong without learning which move
+did it, and without spending twenty minutes on a grid that cannot be solved.
 
-1. The notice waits a random two to four further moves.
-2. It then fades in over 18 seconds.
+The wait is measured in time rather than in moves. Waiting for a few further
+moves also hides the moment of the mistake, but a player who has gone wrong is
+often the one who then sits and stares at the grid, and moves that never come
+would leave exactly the wrong person unattended. A later move neither restarts
+the fade nor hurries it.
 
-Two things cut that short, and both are cases where there is nothing left to
+Two things cut the wait short, and both are cases where there is nothing left to
 protect the player from. Asking for a hint on a broken grid brings the notice up
 instead of ringing anything, since nothing can be worked out. And a grid that is
 full but wrong cannot be worked on at all, so the notice appears the moment the
 last cell is filled in. Both show it outright rather than shortening the fade:
 once a CSS transition is running, changing its duration does not disturb it,
 because opacity is already headed for the same value.
-
-So the player learns that something is wrong without learning which move did it,
-and without spending twenty minutes on a grid that cannot be solved.
 
 The notice element is always in the document; only its opacity and visibility
 change. Mounting it on the wrong move resized the left column and moved the clue

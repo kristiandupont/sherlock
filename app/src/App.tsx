@@ -8,7 +8,7 @@ import {
   type BoardState,
 } from "./game/board";
 import { findHints, type Hint } from "./game/hint";
-import { firstBrokenIndex, movesSinceBroken, rewindToLastGood } from "./game/history";
+import { firstBrokenIndex, rewindToLastGood } from "./game/history";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
 import { Board, type InteractionMode } from "./ui/Board";
@@ -22,13 +22,17 @@ const STORAGE_KEY = "sherlock:game:v3";
 
 /**
  * A wrong move is not reported straight away — that would amount to a hint on
- * every move. Instead the notice waits a random two to four further moves, then
- * fades in over `NOTICE_FADE_SECONDS`, so the player learns that something is
- * wrong without learning which move did it.
+ * every move. The notice instead begins fading in the moment the grid goes
+ * wrong, and takes `NOTICE_FADE_SECONDS` to arrive. It stays imperceptible for
+ * the first several of those, so the player learns that something is wrong
+ * without learning which move did it.
+ *
+ * The wait is measured in time rather than in moves, because a player who has
+ * gone wrong is often the one who then sits and stares: waiting for moves that
+ * never come would leave exactly the wrong person unattended.
  */
-const NOTICE_GRACE_MOVES = [2, 3, 4];
 const REWIND_HINT = "Return to the last position that had no mistakes";
-const NOTICE_FADE_SECONDS = 18;
+const NOTICE_FADE_SECONDS = 25;
 
 /** How long a hint's ring stays before it fades out; matches the CSS animation. */
 const HINT_VISIBLE_MS = 4500;
@@ -92,8 +96,6 @@ export default function App() {
   const [hint, setHint] = useState<Hint | null>(null);
   /** Advances on each Hint press so repeats move through the rest. */
   const [hintCursor, setHintCursor] = useState(0);
-  /** Moves to let pass before the wrong-turn notice starts appearing. */
-  const [grace, setGrace] = useState<number | null>(null);
   const [noticeVisible, setNoticeVisible] = useState(false);
   /**
    * Shows the notice outright instead of fading it in. Shortening the fade is
@@ -117,16 +119,9 @@ export default function App() {
     () => firstBrokenIndex(game.history, game.puzzle.solution),
     [game.history, game.puzzle],
   );
-  const sinceBroken = useMemo(
-    () => movesSinceBroken(game.history, game.puzzle.solution),
-    [game.history, game.puzzle],
-  );
-  const warnWrongTurn = brokenIndex >= 0 && grace !== null && sinceBroken >= grace;
+  const warnWrongTurn = brokenIndex >= 0;
 
-  const revealNotice = useCallback(() => {
-    setNoticeRevealed(true);
-    setGrace(0);
-  }, []);
+  const revealNotice = useCallback(() => setNoticeRevealed(true), []);
 
   useEffect(() => {
     if (solved && !solvedBefore.current) setCelebrating(true);
@@ -141,21 +136,12 @@ export default function App() {
     revealNotice();
   }, [complete, brokenIndex, revealNotice]);
 
-  // The grace period is drawn once per wrong turn, and forgotten as soon as the
-  // grid is correct again.
+  // A grid put right again forgets that it was ever revealed.
   useEffect(() => {
-    if (brokenIndex < 0) {
-      setGrace(null);
-      setNoticeRevealed(false);
-      return;
-    }
-    setGrace(
-      (previous) =>
-        previous ?? NOTICE_GRACE_MOVES[Math.floor(Math.random() * NOTICE_GRACE_MOVES.length)],
-    );
+    if (brokenIndex < 0) setNoticeRevealed(false);
   }, [brokenIndex]);
 
-  // Mounted at zero opacity, then transitioned up on the next frame.
+  // Held at zero opacity for a frame, then transitioned up.
   useEffect(() => {
     if (!warnWrongTurn) {
       setNoticeVisible(false);
@@ -372,7 +358,12 @@ export default function App() {
             style={{
               opacity: noticeRevealed || noticeVisible ? 1 : 0,
               visibility: warnWrongTurn ? "visible" : "hidden",
-              transition: noticeRevealed ? "none" : `opacity ${NOTICE_FADE_SECONDS}s linear`,
+              // No transition while it is hidden, so a grid put right and then
+              // broken again starts its fade from zero rather than part-way up.
+              transition:
+                noticeRevealed || !warnWrongTurn
+                  ? "none"
+                  : `opacity ${NOTICE_FADE_SECONDS}s linear`,
             }}
             aria-hidden={!warnWrongTurn}
           >

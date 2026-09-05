@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { generatePuzzle } from "../model/generate";
 import { emptyBoard, hasMistake, placeTile, removeCandidate, type BoardState } from "./board";
-import { firstBrokenIndex, lastGoodIndex, movesSinceBroken, rewindToLastGood } from "./history";
+import { firstBrokenIndex, lastGoodIndex, rewindToLastGood } from "./history";
 
 const puzzle = generatePuzzle({ seed: 21 });
 const { solution, size } = puzzle;
@@ -26,11 +26,10 @@ describe("history", () => {
     for (let col = 0; col < 4; col++) history.push(correctMove(history[history.length - 1], 0, col));
     expect(firstBrokenIndex(history, solution)).toBe(-1);
     expect(lastGoodIndex(history, solution)).toBe(history.length - 1);
-    expect(movesSinceBroken(history, solution)).toBe(0);
     expect(rewindToLastGood(history, solution)).toBe(history);
   });
 
-  it("finds the move that broke the grid and counts the moves since", () => {
+  it("finds the move that broke the grid", () => {
     const history = [emptyBoard(size)];
     history.push(correctMove(history[0], 0, 0));
     history.push(correctMove(history[1], 1, 0));
@@ -40,7 +39,6 @@ describe("history", () => {
 
     expect(firstBrokenIndex(history, solution)).toBe(3);
     expect(lastGoodIndex(history, solution)).toBe(2);
-    expect(movesSinceBroken(history, solution)).toBe(2);
   });
 
   it("rewinds to the last correct board, dropping everything built on the mistake", () => {

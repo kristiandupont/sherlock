@@ -28,9 +28,3 @@ export function rewindToLastGood(history: BoardState[], solution: Solution): Boa
   // The starting board can never be wrong, so at least one board always remains.
   return broken < 0 ? history : history.slice(0, Math.max(broken, 1));
 }
-
-/** How many moves have been made since the grid was last correct. */
-export function movesSinceBroken(history: BoardState[], solution: Solution): number {
-  const broken = firstBrokenIndex(history, solution);
-  return broken < 0 ? 0 : history.length - 1 - broken;
-}
