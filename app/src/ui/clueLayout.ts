@@ -24,29 +24,11 @@ export function cardSize(clue: Clue): { width: number; height: number } {
 
 const GAP = 12;
 
-/** Packs the cards into rows across `width`, tallest-row-first per shelf. */
-export function layoutClues(clues: Clue[], width: number): Point[] {
-  const usable = Math.max(width - GAP, 200);
-  const positions: Point[] = [];
-  let x = GAP;
-  let y = GAP;
-  let rowHeight = 0;
-
-  for (const clue of clues) {
-    const { width: w, height: h } = cardSize(clue);
-    if (x + w > usable && x > GAP) {
-      x = GAP;
-      y += rowHeight + GAP;
-      rowHeight = 0;
-    }
-    positions.push({ x, y });
-    x += w + GAP;
-    rowHeight = Math.max(rowHeight, h);
-  }
-  return positions;
-}
-
-/** Groups cards of the same kind together, each kind starting a new row. */
+/**
+ * The starting arrangement: cards grouped by kind, each kind on its own row.
+ * From there the player drags them wherever they like, which is the point of
+ * the canvas, so nothing rearranges them again.
+ */
 export function layoutCluesByKind(clues: Clue[], width: number): Point[] {
   const order = ["same-column", "different-column", "adjacent", "left-of", "between"] as const;
   const positions = new Array<Point>(clues.length);

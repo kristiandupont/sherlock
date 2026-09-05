@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   emptyBoard,
+  isComplete,
   isSolved,
-  mistakes,
   placeTile,
   removeCandidate,
   type BoardState,
 } from "./game/board";
-import { hintOutcome } from "./game/hint";
+import { findHints, type Hint } from "./game/hint";
 import { firstBrokenIndex, movesSinceBroken, rewindToLastGood } from "./game/history";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
 import { Board, type InteractionMode } from "./ui/Board";
 import { ClueCanvas } from "./ui/ClueCanvas";
+import { Confetti } from "./ui/Confetti";
 import { Legend } from "./ui/Legend";
-import { layoutClues, layoutCluesByKind, type Point } from "./ui/clueLayout";
+import { layoutCluesByKind, type Point } from "./ui/clueLayout";
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 const STORAGE_KEY = "sherlock:game:v3";
@@ -28,6 +29,9 @@ const STORAGE_KEY = "sherlock:game:v3";
 const NOTICE_GRACE_MOVES = [2, 3, 4];
 const REWIND_HINT = "Return to the last position that had no mistakes";
 const NOTICE_FADE_SECONDS = 18;
+
+/** How long a hint's ring stays before it fades out; matches the CSS animation. */
+const HINT_VISIBLE_MS = 4500;
 
 type Game = {
   difficulty: Difficulty;
@@ -85,19 +89,29 @@ function loadGame(): Game | null {
 export default function App() {
   const [game, setGame] = useState<Game>(() => loadGame() ?? startGame("medium"));
   const [mode, setMode] = useState<InteractionMode>("place");
-  const [flagged, setFlagged] = useState<Set<string>>(new Set());
-  const [hint, setHint] = useState<{ clueIndex: number | null; message: string } | null>(null);
-  /** Advances on each Hint press so repeats cycle through the other clues. */
+  const [hint, setHint] = useState<Hint | null>(null);
+  /** Advances on each Hint press so repeats move through the rest. */
   const [hintCursor, setHintCursor] = useState(0);
   /** Moves to let pass before the wrong-turn notice starts appearing. */
   const [grace, setGrace] = useState<number | null>(null);
   const [noticeVisible, setNoticeVisible] = useState(false);
+  /**
+   * Shows the notice outright instead of fading it in. Shortening the fade is
+   * not enough: once the transition is running, changing its duration does not
+   * disturb it, because opacity is already headed for the same value.
+   */
+  const [noticeRevealed, setNoticeRevealed] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const board = game.history[game.history.length - 1];
   const solved = useMemo(() => isSolved(board, game.puzzle.solution), [board, game.puzzle]);
+  const complete = useMemo(() => isComplete(board), [board]);
+  const [celebrating, setCelebrating] = useState(false);
+  // Starts at the loaded game's state, so reopening a finished puzzle does not
+  // celebrate it again.
+  const solvedBefore = useRef(solved);
   const stats = useMemo(() => puzzleStats(game.puzzle), [game.puzzle]);
   const brokenIndex = useMemo(
     () => firstBrokenIndex(game.history, game.puzzle.solution),
@@ -109,11 +123,30 @@ export default function App() {
   );
   const warnWrongTurn = brokenIndex >= 0 && grace !== null && sinceBroken >= grace;
 
+  const revealNotice = useCallback(() => {
+    setNoticeRevealed(true);
+    setGrace(0);
+  }, []);
+
+  useEffect(() => {
+    if (solved && !solvedBefore.current) setCelebrating(true);
+    solvedBefore.current = solved;
+  }, [solved]);
+
+  // A grid that is full but wrong cannot be worked on any further, so there is
+  // nothing left to protect the player from: the notice comes up at once rather
+  // than creeping in over the next few moves.
+  useEffect(() => {
+    if (!complete || brokenIndex < 0) return;
+    revealNotice();
+  }, [complete, brokenIndex, revealNotice]);
+
   // The grace period is drawn once per wrong turn, and forgotten as soon as the
   // grid is correct again.
   useEffect(() => {
     if (brokenIndex < 0) {
       setGrace(null);
+      setNoticeRevealed(false);
       return;
     }
     setGrace(
@@ -133,6 +166,12 @@ export default function App() {
   }, [warnWrongTurn]);
 
   useEffect(() => {
+    if (!hint) return;
+    const timer = window.setTimeout(() => setHint(null), HINT_VISIBLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [hint]);
+
+  useEffect(() => {
     const element = canvasRef.current;
     if (!element) return;
     const observer = new ResizeObserver(([entry]) => setCanvasWidth(entry.contentRect.width));
@@ -147,7 +186,7 @@ export default function App() {
     setGame((current) =>
       current.positions.length === current.puzzle.clues.length
         ? current
-        : { ...current, positions: layoutClues(current.puzzle.clues, canvasWidth) },
+        : { ...current, positions: layoutCluesByKind(current.puzzle.clues, canvasWidth) },
     );
   }, [canvasWidth, game.puzzle]);
 
@@ -169,7 +208,6 @@ export default function App() {
   }, [game]);
 
   const pushBoard = useCallback((next: BoardState) => {
-    setFlagged(new Set());
     setHint(null);
     setHintCursor(0);
     setGame((current) =>
@@ -192,7 +230,6 @@ export default function App() {
     );
 
   const clearNotices = () => {
-    setFlagged(new Set());
     setHint(null);
     setHintCursor(0);
   };
@@ -207,10 +244,6 @@ export default function App() {
     setGame(startGame(difficulty));
   };
 
-  const check = () => {
-    setFlagged(new Set(mistakes(board, game.puzzle.solution).map(([r, c]) => `${r}:${c}`)));
-  };
-
   /** Drops every board built on top of the wrong move. */
   const rewind = () => {
     clearNotices();
@@ -221,48 +254,30 @@ export default function App() {
   };
 
   /**
-   * Rings a clue that still narrows the grid, and says nothing about what it
-   * narrows. Pressing again moves to the next-best clue.
+   * Rings whatever the player could work out next — a cell, or a clue — and says
+   * nothing about what it yields. The ring fades by itself, and pressing again
+   * moves on to the next one.
+   *
+   * On a broken grid nothing can be worked out, so the wrong-turn notice is
+   * brought up at once instead. That is the honest answer to "help me", and the
+   * player asked for it, so nothing is given away about when the mistake was
+   * made.
    */
   const showHint = () => {
-    const outcome = hintOutcome(board, game.puzzle.clues, game.used);
-    if (outcome.kind === "bookkeeping") {
-      setHint({
-        clueIndex: null,
-        message: solved
-          ? "Nothing left to work out."
-          : "No clue is needed — what is left follows from the symbols already on the grid.",
-      });
+    if (brokenIndex >= 0) {
+      revealNotice();
       return;
     }
-    if (outcome.kind === "stuck") {
-      setHint({
-        clueIndex: null,
-        message:
-          "No clue narrows the grid any further, which means something has been ruled out wrongly. Try Check.",
-      });
-      return;
-    }
-    const { hints } = outcome;
+    const hints = findHints(board, game.puzzle.clues, game.used);
+    if (hints.length === 0) return;
     const pick = hints[hintCursor % hints.length];
     setHintCursor((cursor) => cursor + 1);
-    setHint({
-      clueIndex: pick.clueIndex,
-      message:
-        hints.length > 1
-          ? "This clue still narrows the grid. Press Hint again for a different one."
-          : "This clue still narrows the grid.",
-    });
+    // Cleared first so that ringing the same target twice restarts its animation.
+    setHint(null);
+    requestAnimationFrame(() => setHint(pick));
   };
 
-  const arrange = (grouped: boolean) =>
-    setGame((current) => ({
-      ...current,
-      positions: (grouped ? layoutCluesByKind : layoutClues)(
-        current.puzzle.clues,
-        canvasWidth || 800,
-      ),
-    }));
+  const stopCelebrating = useCallback(() => setCelebrating(false), []);
 
   const moveClue = useCallback((index: number, point: Point) => {
     setGame((current) => {
@@ -302,12 +317,7 @@ export default function App() {
           Undo
         </Button>
         <Button onClick={restart}>Restart</Button>
-        <Button onClick={check}>Check</Button>
         <Button onClick={showHint}>Hint</Button>
-
-        <span className="mx-1 h-5 w-px bg-slate-200" />
-        <Button onClick={() => arrange(false)}>Tidy clues</Button>
-        <Button onClick={() => arrange(true)}>Group by type</Button>
 
         <label className="ml-1 flex items-center gap-1.5 text-sm text-slate-600">
           <input
@@ -340,7 +350,7 @@ export default function App() {
             <Board
               board={board}
               mode={mode}
-              flagged={flagged}
+              highlight={hint?.kind === "cell" ? hint : null}
               onPlace={handlePlace}
               onRuleOut={handleRuleOut}
             />
@@ -350,22 +360,7 @@ export default function App() {
               Solved. Every column is settled.
             </p>
           )}
-          {hint && (
-            <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              {hint.message}
-            </p>
-          )}
-          {flagged.size > 0 && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-              <span>
-                {flagged.size} cell{flagged.size === 1 ? "" : "s"} rule out the symbol that belongs
-                there.
-              </span>
-              <Button onClick={rewind} title={REWIND_HINT}>
-                Go back
-              </Button>
-            </div>
-          )}
+          {celebrating && <Confetti onDone={stopCelebrating} />}
 
           {/*
             The notice is always in the document and only its opacity changes.
@@ -375,9 +370,9 @@ export default function App() {
           <div
             className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
             style={{
-              opacity: noticeVisible ? 1 : 0,
+              opacity: noticeRevealed || noticeVisible ? 1 : 0,
               visibility: warnWrongTurn ? "visible" : "hidden",
-              transition: `opacity ${NOTICE_FADE_SECONDS}s linear`,
+              transition: noticeRevealed ? "none" : `opacity ${NOTICE_FADE_SECONDS}s linear`,
             }}
             aria-hidden={!warnWrongTurn}
           >
@@ -396,7 +391,7 @@ export default function App() {
             used={game.used}
             onMove={moveClue}
             onToggleUsed={toggleUsed}
-            highlight={hint?.clueIndex ?? null}
+            highlight={hint?.kind === "clue" ? hint.clueIndex : null}
           />
         </section>
       </main>

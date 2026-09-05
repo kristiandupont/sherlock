@@ -9,7 +9,8 @@ the symbols relate across columns, and the grid is worked out from them alone.
 Unlike the original, the clues are not pinned to fixed slots. Every clue is a
 card on a freeform canvas: drag it anywhere, put a same-column clue next to the
 adjacency clue it interacts with, and click a card to grey it out once it has
-been used.
+been used. Cards start grouped by kind and are never rearranged again — where
+they end up is the player's business.
 
 The app lives in [`app/`](app):
 
@@ -68,35 +69,40 @@ resulting clue count:
 | medium | 20–25 | ~20%            |
 | hard   | 17–22 | ~43%            |
 
-## Check and Hint
+## Hints
 
-**Check** compares the grid against the stored solution and flags every cell
-where the symbol that belongs there has been ruled out. It is an oracle: it
-reads the answer rather than reasoning about it.
+A hint points at something the player could work out next, and says nothing
+about what it yields. It rings its target for four and a half seconds and then
+fades out on its own, so a hint already taken in does not sit on the screen for
+the rest of the game. Pressing Hint again moves to the next one.
 
-**Hint** does not. It asks the solver which clues still say something about the
-grid as it stands — a clue qualifies when applying it would remove at least one
-candidate that the grid's own bookkeeping would not have removed anyway — and
-rings the best one. It never
-says what the clue implies, or where. Pressing again moves to the next-best
-clue. Ranking prefers clues that settle a cell outright over ones that only
-narrow candidates, and leaves clues the player has greyed out until last.
+Candidates are ordered by how obvious they are, in `app/src/game/hint.ts`:
 
-`findHints` in `app/src/game/hint.ts` calls the same `applyClue` the solver uses, so
-a hint cannot disagree with the solver about what a clue means. The tests solve
-every generated puzzle by following nothing but its own hints.
+1. A cell with one symbol left in it.
+2. A cell that is the last place in its row where some symbol can go.
+3. The clues that still narrow the grid.
 
-Because the board leaves placements to the player, the grid may be behind on
-consequences that follow mechanically. Hints are therefore measured against a
-baseline of the grid with all of that worked through, so a clue is never
-credited with bookkeeping the player simply has not done yet. That gives three
-answers rather than two: a clue to look at, "no clue is needed, what is left
-follows from the symbols already placed", or nothing at all — which on an
-unfinished grid means something has been ruled out wrongly.
+The first two need no clue at all, which is why they come first. Both ring the
+cell without naming a symbol — for the second, working out which symbol has run
+out of homes is left to the player.
 
-Note that a hint being available is no promise that the grid so far is correct:
-a wrong elimination in one row leaves clues about the other rows still saying
-plenty. Only Check answers that question.
+Clue hints are measured against a baseline of the grid with all its mechanical
+consequences worked through. The board leaves placements to the player, so the
+grid can be behind on those, and a clue must not be credited with bookkeeping
+they simply have not done yet. Ranking then prefers clues that settle a cell
+outright over ones that only narrow candidates, and leaves clues the player has
+greyed out until last. `findClueHints` calls the same `applyClue` the solver
+uses, so a hint cannot disagree with the solver about what a clue means. The
+tests solve every generated puzzle by following nothing but its own hints,
+claiming cells and working clues through exactly as a player would.
+
+There is no button that checks the grid against the answer. A hint being offered
+is no promise that the grid so far is correct — a wrong elimination in one row
+leaves the other rows still saying plenty — so the wrong-turn notice below is
+what reports a mistake. On a grid that has already gone wrong there is nothing
+left to work out, so asking for a hint brings that notice up at once instead of
+ringing anything. The player asked for it, so nothing is given away about when
+the mistake was made.
 
 ## Going back after a wrong move
 
@@ -112,6 +118,14 @@ every move. Instead:
 1. The notice waits a random two to four further moves.
 2. It then fades in over 18 seconds.
 
+Two things cut that short, and both are cases where there is nothing left to
+protect the player from. Asking for a hint on a broken grid brings the notice up
+instead of ringing anything, since nothing can be worked out. And a grid that is
+full but wrong cannot be worked on at all, so the notice appears the moment the
+last cell is filled in. Both show it outright rather than shortening the fade:
+once a CSS transition is running, changing its duration does not disturb it,
+because opacity is already headed for the same value.
+
 So the player learns that something is wrong without learning which move did it,
 and without spending twenty minutes on a grid that cannot be solved.
 
@@ -124,16 +138,28 @@ The way back is offered only inside that notice, or alongside a Check the player
 asked for. A permanently visible "go back" button would be an instant mistake
 detector and would defeat the delay.
 
+## Finishing
+
+A correct grid gets confetti, thrown in the six tile colours from two cannons at
+the foot of the screen, over `app/src/ui/Confetti.tsx`. It is a plain canvas and
+a few dozen lines of physics rather than a dependency, it clears itself away
+after three and a half seconds, and it leaves the banner behind so the result is
+still there afterwards. Anyone whose system asks for reduced motion gets the
+banner alone. Reopening a puzzle that was already finished does not celebrate it
+a second time.
+
 ## Layout
 
 - `app/src/model/` — types, bit helpers, the solver, and the generator. No React.
 - `app/src/game/board.ts` — the player's grid state. A placement takes its
   symbol out of the rest of its row and stops there: the board never reasons
   from clues, and never claims a cell on the player's behalf.
-- `app/src/game/hint.ts` — ranks the clues that still narrow the grid.
+- `app/src/game/hint.ts` — ranks what the player could work out next: cells
+  first, then clues.
 - `app/src/game/history.ts` — finds the move that broke the grid, and rewinds to
   just before it.
-- `app/src/ui/` — tile artwork, the board, the clue cards, and the canvas.
+- `app/src/ui/` — tile artwork, the board, the clue cards, the canvas, and the
+  confetti.
 - `app/src/App.tsx` — controls, undo history, and saving to `localStorage`. A saved
   game stores the seed, the difficulty and every board of the history; the
   puzzle itself is reproducible from the first two, and the history is what

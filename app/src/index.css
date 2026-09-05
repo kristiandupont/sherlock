@@ -8,17 +8,26 @@ html,
   height: 100%;
 }
 
-/* Ring drawn around the clue a hint points at. */
+/*
+ * Ring drawn around whatever a hint points at. It comes up quickly, holds, then
+ * widens and fades away on its own, so a hint the player has taken in does not
+ * sit there for the rest of the game.
+ */
 @keyframes hint-ring {
-  0%,
-  100% {
-    box-shadow: 0 0 0 3px rgb(245 158 11 / 0.9);
+  0% {
+    box-shadow: 0 0 0 0 rgb(245 158 11 / 0);
   }
-  50% {
-    box-shadow: 0 0 0 8px rgb(245 158 11 / 0.25);
+  6% {
+    box-shadow: 0 0 0 3px rgb(245 158 11 / 0.95);
+  }
+  55% {
+    box-shadow: 0 0 0 3px rgb(245 158 11 / 0.95);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgb(245 158 11 / 0);
   }
 }
 
 .hint-ring {
-  animation: hint-ring 1.3s ease-in-out infinite;
+  animation: hint-ring 4.5s ease-out forwards;
 }
