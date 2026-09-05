@@ -4,64 +4,58 @@ import type { Solution } from "../model/types";
 /**
  * What the player sees: `cells[row][col]` is the set of tiles still possible in
  * that cell, as a bitmask. This is the transpose of the solver's PosMask.
+ *
+ * `placed[row][col]` records that the player put that symbol there themselves.
+ * A cell down to its last candidate is *not* placed: seeing the one remaining
+ * option and clicking it is the move, and the cascade it sets off is the reward
+ * for having worked it out. So the board never places a symbol on the player's
+ * behalf.
  */
 export type BoardState = {
   size: number;
   cells: number[][];
+  placed: boolean[][];
 };
 
 export const emptyBoard = (size: number): BoardState => ({
   size,
   cells: Array.from({ length: size }, () => new Array<number>(size).fill(fullMask(size))),
+  placed: Array.from({ length: size }, () => new Array<boolean>(size).fill(false)),
 });
 
 const cloneCells = (board: BoardState): number[][] => board.cells.map((row) => row.slice());
 
 /**
- * Bookkeeping that follows from the shape of the grid alone: a tile placed in a
- * column cannot appear elsewhere in its row, and a tile with only one column
- * left belongs there. This is not deduction from clues — that stays the
- * player's job.
+ * The one consequence a placement carries: a symbol the player has placed in a
+ * column cannot also be somewhere else in its row. Nothing here ever places a
+ * symbol, so it cannot cascade into further placements.
  */
-function settle(size: number, cells: number[][]): number[][] {
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (let row = 0; row < size; row++) {
-      for (let col = 0; col < size; col++) {
-        const mask = cells[row][col];
-        if (!isSingle(mask)) continue;
-        for (let other = 0; other < size; other++) {
-          if (other === col || !(cells[row][other] & mask)) continue;
-          cells[row][other] &= ~mask;
-          changed = true;
-        }
-      }
-      for (let tile = 0; tile < size; tile++) {
-        const tileBit = bit(tile);
-        let count = 0;
-        let last = -1;
-        for (let col = 0; col < size; col++) {
-          if (cells[row][col] & tileBit) {
-            count++;
-            last = col;
-          }
-        }
-        if (count === 1 && cells[row][last] !== tileBit) {
-          cells[row][last] = tileBit;
-          changed = true;
-        }
+function applyPlacements(size: number, cells: number[][], placed: boolean[][]): number[][] {
+  for (let row = 0; row < size; row++)
+    for (let col = 0; col < size; col++) {
+      if (!placed[row][col]) continue;
+      const mask = cells[row][col];
+      for (let other = 0; other < size; other++) {
+        if (other === col) continue;
+        cells[row][other] &= ~mask;
       }
     }
-  }
   return cells;
 }
 
-/** Places `tile` in this cell, discarding the cell's other candidates. */
+/**
+ * Places `tile` in this cell, discarding the cell's other candidates. Refused
+ * if the symbol has already been ruled out here, which keeps two cells of a row
+ * from claiming the same symbol.
+ */
 export function placeTile(board: BoardState, row: number, col: number, tile: number): BoardState {
+  if (!(board.cells[row][col] & bit(tile))) return board;
+  if (board.placed[row][col] && board.cells[row][col] === bit(tile)) return board;
   const cells = cloneCells(board);
+  const placed = board.placed.map((r) => r.slice());
   cells[row][col] = bit(tile);
-  return { size: board.size, cells: settle(board.size, cells) };
+  placed[row][col] = true;
+  return { size: board.size, cells: applyPlacements(board.size, cells, placed), placed };
 }
 
 /**
@@ -78,7 +72,7 @@ export function removeCandidate(
   if (!(mask & bit(tile)) || isSingle(mask)) return board;
   const cells = cloneCells(board);
   cells[row][col] = mask & ~bit(tile);
-  return { size: board.size, cells: settle(board.size, cells) };
+  return { size: board.size, cells, placed: board.placed };
 }
 
 export const candidatesAt = (board: BoardState, row: number, col: number): number[] =>
@@ -87,12 +81,16 @@ export const candidatesAt = (board: BoardState, row: number, col: number): numbe
 export const candidateCount = (board: BoardState, row: number, col: number): number =>
   popCount(board.cells[row][col]);
 
-/** The tile placed in this cell, or -1 while more than one remains possible. */
+/** The tile the player has placed in this cell, or -1 if they have not. */
 export const placedTile = (board: BoardState, row: number, col: number): number =>
-  isSingle(board.cells[row][col]) ? lowestBit(board.cells[row][col]) : -1;
+  board.placed[row][col] ? lowestBit(board.cells[row][col]) : -1;
+
+/** One candidate left, waiting for the player to claim it. */
+export const isReadyToPlace = (board: BoardState, row: number, col: number): boolean =>
+  !board.placed[row][col] && isSingle(board.cells[row][col]);
 
 export const isComplete = (board: BoardState): boolean =>
-  board.cells.every((row) => row.every(isSingle));
+  board.placed.every((row) => row.every(Boolean));
 
 /** Whether any cell has ruled out the tile that belongs there. Stops at the first. */
 export function hasMistake(board: BoardState, solution: Solution): boolean {
@@ -129,13 +127,18 @@ export function boardToPositions(board: BoardState): Int32Array {
   return pos;
 }
 
+/**
+ * Reads solver positions back as a board. Anything the solver narrowed to one
+ * candidate counts as placed, since this represents reasoning carried through
+ * rather than a grid the player is part-way across.
+ */
 export function positionsToBoard(pos: Int32Array, size: number): BoardState {
   const cells = Array.from({ length: size }, () => new Array<number>(size).fill(0));
   for (let row = 0; row < size; row++)
     for (let tile = 0; tile < size; tile++)
       for (let col = 0; col < size; col++)
         if (pos[row * size + tile] & bit(col)) cells[row][col] |= bit(tile);
-  return { size, cells };
+  return { size, cells, placed: cells.map((row) => row.map(isSingle)) };
 }
 
 export function boardFromSolution(solution: Solution): BoardState {
@@ -143,5 +146,6 @@ export function boardFromSolution(solution: Solution): BoardState {
   return {
     size,
     cells: solution.map((row) => row.map((tile) => bit(tile))),
+    placed: solution.map((row) => row.map(() => true)),
   };
 }

@@ -15,7 +15,7 @@ import {
   removeCandidate,
   type BoardState,
 } from "./board";
-import { findHint, findHints } from "./hint";
+import { findHint, findHints, hintOutcome } from "./hint";
 
 /** Works out everything the clue settles, as a player following the hint would. */
 function applyClue(board: BoardState, clue: Clue): BoardState {
@@ -94,6 +94,34 @@ describe("findHint", () => {
     board = placeTile(board, clue.b.row, 1, clue.b.tile);
     const offered = findHints(board, puzzle.clues).map((hint) => puzzle.clues[hint.clueIndex]);
     expect(offered).not.toContain(clue);
+  });
+
+  it("does not credit a clue with bookkeeping the player has not done", () => {
+    const { solution, clues, size } = generatePuzzle({ seed: 13 });
+    // Narrow every cell to the right symbol by elimination alone, claiming
+    // none of them. The grid is fully determined, so no clue has anything left
+    // to say, and none should be offered as though it had.
+    let board = emptyBoard(size);
+    for (let row = 0; row < size; row++)
+      for (let col = 0; col < size; col++)
+        for (let tile = 0; tile < size; tile++)
+          if (tile !== solution[row][col]) board = removeCandidate(board, row, col, tile);
+
+    expect(findHints(board, clues)).toEqual([]);
+    expect(hintOutcome(board, clues).kind).toBe("bookkeeping");
+  });
+
+  it("reports a grid that cannot be finished as stuck rather than as bookkeeping", () => {
+    const { clues, size } = generatePuzzle({ seed: 13 });
+    // Rule one symbol out of every cell of a row, leaving it nowhere to go.
+    let board = emptyBoard(size);
+    for (let col = 0; col < size; col++) board = removeCandidate(board, 0, col, 2);
+    expect(hintOutcome(board, clues).kind).toBe("stuck");
+  });
+
+  it("still offers a clue while the grid is only part-way narrowed", () => {
+    const { clues, size } = generatePuzzle({ seed: 13 });
+    expect(hintOutcome(emptyBoard(size), clues).kind).toBe("clue");
   });
 
   it("keeps offering hints elsewhere after a wrong elimination", () => {

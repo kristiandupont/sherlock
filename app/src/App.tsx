@@ -7,7 +7,7 @@ import {
   removeCandidate,
   type BoardState,
 } from "./game/board";
-import { findHints } from "./game/hint";
+import { hintOutcome } from "./game/hint";
 import { firstBrokenIndex, movesSinceBroken, rewindToLastGood } from "./game/history";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
@@ -17,7 +17,7 @@ import { Legend } from "./ui/Legend";
 import { layoutClues, layoutCluesByKind, type Point } from "./ui/clueLayout";
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
-const STORAGE_KEY = "sherlock:game:v2";
+const STORAGE_KEY = "sherlock:game:v3";
 
 /**
  * A wrong move is not reported straight away — that would amount to a hint on
@@ -43,7 +43,7 @@ type Saved = {
   seed: number;
   size: number;
   /** Every board of the history, oldest first, so undo and rewind survive a reload. */
-  history: number[][][];
+  history: Array<{ cells: number[][]; placed: boolean[][] }>;
   positions: Point[];
   used: boolean[];
 };
@@ -69,10 +69,11 @@ function loadGame(): Game | null {
     const puzzle = generatePuzzle({ seed: saved.seed, difficulty: saved.difficulty, size: saved.size });
     if (puzzle.seed !== saved.seed || puzzle.clues.length !== saved.used.length) return null;
     if (!Array.isArray(saved.history) || saved.history.length === 0) return null;
+    if (saved.history.some((state) => !state?.cells || !state?.placed)) return null;
     return {
       difficulty: saved.difficulty,
       puzzle,
-      history: saved.history.map((cells) => ({ size: saved.size, cells })),
+      history: saved.history.map(({ cells, placed }) => ({ size: saved.size, cells, placed })),
       positions: saved.positions,
       used: saved.used,
     };
@@ -156,7 +157,7 @@ export default function App() {
       difficulty: game.difficulty,
       seed: game.puzzle.seed,
       size: game.puzzle.size,
-      history: game.history.map((state) => state.cells),
+      history: game.history.map(({ cells, placed }) => ({ cells, placed })),
       positions: game.positions,
       used: game.used,
     };
@@ -224,16 +225,25 @@ export default function App() {
    * narrows. Pressing again moves to the next-best clue.
    */
   const showHint = () => {
-    const hints = findHints(board, game.puzzle.clues, game.used);
-    if (hints.length === 0) {
+    const outcome = hintOutcome(board, game.puzzle.clues, game.used);
+    if (outcome.kind === "bookkeeping") {
       setHint({
         clueIndex: null,
         message: solved
           ? "Nothing left to work out."
-          : "No clue narrows the grid any further, which means something has been ruled out wrongly. Try Check.",
+          : "No clue is needed — what is left follows from the symbols already on the grid.",
       });
       return;
     }
+    if (outcome.kind === "stuck") {
+      setHint({
+        clueIndex: null,
+        message:
+          "No clue narrows the grid any further, which means something has been ruled out wrongly. Try Check.",
+      });
+      return;
+    }
+    const { hints } = outcome;
     const pick = hints[hintCursor % hints.length];
     setHintCursor((cursor) => cursor + 1);
     setHint({

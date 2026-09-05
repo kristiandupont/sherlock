@@ -1,4 +1,4 @@
-import { candidatesAt, placedTile, type BoardState } from "../game/board";
+import { candidatesAt, isReadyToPlace, placedTile, type BoardState } from "../game/board";
 import { TileGlyph } from "./TileGlyph";
 import { ROWS, tileName } from "./tileSets";
 
@@ -16,6 +16,7 @@ type Props = {
 export function Board({ board, mode, flagged, onPlace, onRuleOut }: Props) {
   const { size } = board;
   const slotColumns = Math.ceil(Math.sqrt(size));
+  const slotRows = Math.ceil(size / slotColumns);
 
   return (
     <div className="select-none">
@@ -37,6 +38,7 @@ export function Board({ board, mode, flagged, onPlace, onRuleOut }: Props) {
         {board.cells.map((cells, row) =>
           cells.map((_, col) => {
             const placed = placedTile(board, row, col);
+            const ready = isReadyToPlace(board, row, col);
             const isFlagged = flagged.has(`${row}:${col}`);
             const frame = isFlagged
               ? "border-rose-400 bg-rose-50 ring-2 ring-rose-200"
@@ -47,6 +49,7 @@ export function Board({ board, mode, flagged, onPlace, onRuleOut }: Props) {
             return (
               <div
                 key={`${row}:${col}`}
+                data-cell-state={placed >= 0 ? "placed" : ready ? "ready" : "open"}
                 className={`relative aspect-square rounded-md border ${frame} overflow-hidden`}
                 style={placed >= 0 && !isFlagged ? { backgroundColor: ROWS[row].soft } : undefined}
               >
@@ -62,7 +65,12 @@ export function Board({ board, mode, flagged, onPlace, onRuleOut }: Props) {
                 ) : (
                   <div
                     className="grid h-full w-full p-0.5"
-                    style={{ gridTemplateColumns: `repeat(${slotColumns}, minmax(0, 1fr))` }}
+                    style={{
+                      gridTemplateColumns: `repeat(${slotColumns}, minmax(0, 1fr))`,
+                      // Without explicit rows, a row whose candidates are all
+                      // ruled out collapses and drags the remaining row up.
+                      gridTemplateRows: `repeat(${slotRows}, minmax(0, 1fr))`,
+                    }}
                   >
                     {Array.from({ length: size }, (_, tile) => {
                       const available = candidatesAt(board, row, col).includes(tile);

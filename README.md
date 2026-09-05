@@ -63,10 +63,10 @@ reasoning, so `DIFFICULTY_PRESETS` varies the pool caps and filters on the
 resulting clue count:
 
 | preset | clues | `between` share |
-| --- | --- | --- |
-| easy | 23–28 | ~13% |
-| medium | 20–25 | ~20% |
-| hard | 17–22 | ~43% |
+| ------ | ----- | --------------- |
+| easy   | 23–28 | ~13%            |
+| medium | 20–25 | ~20%            |
+| hard   | 17–22 | ~43%            |
 
 ## Check and Hint
 
@@ -76,7 +76,8 @@ reads the answer rather than reasoning about it.
 
 **Hint** does not. It asks the solver which clues still say something about the
 grid as it stands — a clue qualifies when applying it would remove at least one
-candidate the player has not removed already — and rings the best one. It never
+candidate that the grid's own bookkeeping would not have removed anyway — and
+rings the best one. It never
 says what the clue implies, or where. Pressing again moves to the next-best
 clue. Ranking prefers clues that settle a cell outright over ones that only
 narrow candidates, and leaves clues the player has greyed out until last.
@@ -85,10 +86,17 @@ narrow candidates, and leaves clues the player has greyed out until last.
 a hint cannot disagree with the solver about what a clue means. The tests solve
 every generated puzzle by following nothing but its own hints.
 
+Because the board leaves placements to the player, the grid may be behind on
+consequences that follow mechanically. Hints are therefore measured against a
+baseline of the grid with all of that worked through, so a clue is never
+credited with bookkeeping the player simply has not done yet. That gives three
+answers rather than two: a clue to look at, "no clue is needed, what is left
+follows from the symbols already placed", or nothing at all — which on an
+unfinished grid means something has been ruled out wrongly.
+
 Note that a hint being available is no promise that the grid so far is correct:
 a wrong elimination in one row leaves clues about the other rows still saying
-plenty. Only Check answers that question. Hints run out entirely when no clue
-can act at all, which on an unfinished grid does mean something has gone wrong.
+plenty. Only Check answers that question.
 
 ## Going back after a wrong move
 
@@ -119,8 +127,9 @@ detector and would defeat the delay.
 ## Layout
 
 - `app/src/model/` — types, bit helpers, the solver, and the generator. No React.
-- `app/src/game/board.ts` — the player's grid state. It applies the bookkeeping that
-  follows from the shape of the grid, and never reasons from clues.
+- `app/src/game/board.ts` — the player's grid state. A placement takes its
+  symbol out of the rest of its row and stops there: the board never reasons
+  from clues, and never claims a cell on the player's behalf.
 - `app/src/game/hint.ts` — ranks the clues that still narrow the grid.
 - `app/src/game/history.ts` — finds the move that broke the grid, and rewinds to
   just before it.
