@@ -2,6 +2,8 @@ import type { Clue } from "../model/types";
 import { tileName } from "./tileSets";
 
 export type Point = { x: number; y: number };
+export type Size = { width: number; height: number };
+export type Rect = Point & Size;
 
 /**
  * Exact card footprints. ClueCard renders at these sizes, so the arrangements
@@ -70,4 +72,59 @@ export function describeClue(clue: Clue): string {
     case "between":
       return `${name(clue.middle)} is directly between ${name(clue.a)} and ${name(clue.b)}, in either order`;
   }
+}
+
+/** The rectangle spanned by two corners dragged in any direction. */
+export function rectFromCorners(a: Point, b: Point): Rect {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(a.x - b.x),
+    height: Math.abs(a.y - b.y),
+  };
+}
+
+/**
+ * Indices of the clues whose cards overlap `rect`. A band of no width and no
+ * height is a click rather than a drag and catches nothing, but one flat in a
+ * single direction still sweeps up whatever it crosses.
+ */
+export function cluesWithin(clues: Clue[], positions: Point[], rect: Rect): number[] {
+  if (rect.width === 0 && rect.height === 0) return [];
+  const right = rect.x + rect.width;
+  const bottom = rect.y + rect.height;
+  return clues.reduce<number[]>((found, clue, index) => {
+    const point = positions[index];
+    if (!point) return found;
+    const box = cardSize(clue);
+    const overlaps =
+      point.x < right &&
+      point.x + box.width > rect.x &&
+      point.y < bottom &&
+      point.y + box.height > rect.y;
+    return overlaps ? [...found, index] : found;
+  }, []);
+}
+
+/** The area the cards cover, with room to drop one at the far edge. */
+export function contentBounds(clues: Clue[], positions: Point[]): Size {
+  let width = 0;
+  let height = 0;
+  clues.forEach((clue, index) => {
+    const point = positions[index] ?? { x: 0, y: 0 };
+    const box = cardSize(clue);
+    width = Math.max(width, point.x + box.width);
+    height = Math.max(height, point.y + box.height);
+  });
+  return { width: width + GAP * 2, height: height + GAP * 2 };
+}
+
+/**
+ * The largest zoom that brings all the cards into view. Never above 1: blowing
+ * a handful of cards up to fill the space would look absurd.
+ */
+export function fitZoom(content: Size, viewport: Size, min: number, max: number): number {
+  if (content.width <= 0 || content.height <= 0) return 1;
+  const fits = Math.min(viewport.width / content.width, viewport.height / content.height, 1);
+  return Math.min(max, Math.max(min, fits));
 }

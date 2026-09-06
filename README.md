@@ -95,6 +95,34 @@ outlines, no interior detail. All of it is a lookup table over `{row, tile}`
 indices that the model never looks inside, so swapping in other sets is a data
 change with no logic behind it.
 
+## The clue canvas
+
+Cards are dragged one at a time, or several together. Dragging across empty
+canvas draws a band and selects whatever it crosses; dragging a card that is
+part of that selection carries the whole group, and dragging any other card
+carries only itself and drops the selection, so what moves is always what was
+picked up. Shift-click adds or removes one card, shift-drag adds a band to the
+selection, and Escape clears it.
+
+Clicking a card already means "I have used this one", which is worth more than
+click-to-select, so selection is the band and shift-click instead. That leaves
+dragging empty canvas doing selection rather than panning, so panning is the
+scroll it always was, with middle-drag as well.
+
+Zoom is a `scale` transform on the cards, inside a wrapper sized to the scaled
+extent. Keeping that wrapper the real size means the browser's own scrolling
+still pans, at any zoom, with no scroll handling of ours. What it costs is that
+every pointer measurement has to be converted: screen coordinates become canvas
+coordinates through the surface's scroll offset and the zoom, and a drag moves a
+card by the pointer distance divided by the zoom. Zooming holds one point still
+— the pointer for ⌘/Ctrl-scroll, the centre for the buttons — by working out
+where that point sits on the canvas and setting the scroll so it lands back
+under the cursor, in a layout effect after the new zoom has been laid out.
+
+The geometry is in `app/src/ui/clueLayout.ts` rather than in the component:
+which cards a band caught, the rectangle a drag spans, how far to zoom to fit.
+That part is worth testing on its own, and none of it needs a browser.
+
 ## Hints
 
 A hint points at something the player could work out next, and says nothing

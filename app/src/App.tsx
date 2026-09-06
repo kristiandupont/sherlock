@@ -265,10 +265,10 @@ export default function App() {
 
   const stopCelebrating = useCallback(() => setCelebrating(false), []);
 
-  const moveClue = useCallback((index: number, point: Point) => {
+  const moveClue = useCallback((moves: Array<{ index: number; point: Point }>) => {
     setGame((current) => {
       const positions = current.positions.slice();
-      positions[index] = point;
+      for (const { index, point } of moves) positions[index] = point;
       return { ...current, positions };
     });
   }, []);

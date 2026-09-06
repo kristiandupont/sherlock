@@ -17,10 +17,21 @@ const EXAMPLES: Clue[] = [
 export function Legend() {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-      <p className="mb-3 text-slate-600">
-        Left-click a small symbol to place it, right-click to rule it out. Drag clue cards anywhere
-        on the board to the right; click a card to grey it out once you have used it.
-      </p>
+      <div className="mb-3 space-y-1.5 text-slate-600">
+        <p>
+          Left-click a small symbol to place it, right-click to rule it out.
+        </p>
+        <p>
+          Drag clue cards anywhere on the canvas, and click one to grey it out once you have used
+          it. Drag a box across empty canvas to select several cards, then drag any of them to move
+          the whole group; shift-click adds or removes a single card, and Escape clears the
+          selection.
+        </p>
+        <p>
+          Scroll to move around the canvas, ⌘/Ctrl-scroll or the buttons in the corner to zoom, and
+          Fit to bring every clue into view.
+        </p>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {EXAMPLES.map((clue) => (
           <div key={clue.kind} className="flex items-center gap-3">
