@@ -69,6 +69,32 @@ resulting clue count:
 | medium | 20–25 | ~20%            |
 | hard   | 17–22 | ~43%            |
 
+## The tiles
+
+Six rows: letters, dice, shapes, symbols, things and travel.
+
+The naming matters more than the drawing. A player works a clue out by saying it
+to themselves — "A is next to three" — so a tile needs a name that identifies it
+on its own. An earlier set had digits, roman numerals *and* dice: three rows
+denoting the same six things, so "three" no longer picked out a tile and every
+thought about one needed a qualifier. Colour cannot repair that, because nobody
+thinks in colour, and colour was what carried the distinction. The roman
+numerals were the weakest set on their own terms too — at 18px, IV and VI differ
+only in the order of two strokes, and II and III only in width.
+
+So there is one numeric row now, and the rule is that all thirty-six names are
+distinct. `app/src/ui/tileSets.test.ts` enforces it, and names the reason.
+
+Within a row the glyph tells tiles apart; across rows the hue does. Those two
+channels stay separate, which is why each row is drawn in a single colour. It
+also means colour is now only ever a secondary cue: every row differs in kind as
+well as in hue, which was not true when three rows were all numbers.
+
+Glyphs are drawn to survive being 18px of solid silhouette in a board cell: bold
+outlines, no interior detail. All of it is a lookup table over `{row, tile}`
+indices that the model never looks inside, so swapping in other sets is a data
+change with no logic behind it.
+
 ## Hints
 
 A hint points at something the player could work out next, and says nothing
