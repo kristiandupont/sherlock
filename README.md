@@ -55,6 +55,44 @@ solve proves the solution is unique. `countSolutions` implements backtracking
 search as an independent check of that claim, and the tests assert the two
 agree.
 
+## The clues
+
+Nine kinds, all of them about which column a tile is in:
+
+| kind | says |
+| --- | --- |
+| `same-column` | two tiles share a column |
+| `different-column` | two tiles never share a column |
+| `at-an-end` | a tile is in the first or the last column |
+| `adjacent` | two tiles are in neighbouring columns, either way round |
+| `immediately-left-of` | one tile is in the column directly before another |
+| `apart` | a given number of columns stand between two tiles, either way round |
+| `left-of` | one tile is somewhere left of another |
+| `between` | a tile is directly between two others, which may be either way round |
+| `next-to-either` | a tile neighbours one of a named pair, or both |
+
+The `apart` card draws the columns between the pair as empty cells rather than
+stating a number, which read as either the count of columns between them or the
+step from one to the other. Drawn, it is the `adjacent` card with those columns
+filled in, and the two say the same kind of thing. The gap is capped at three:
+on a six-column board a distance of five leaves only the two ends, a stronger
+statement than the card looks like it is making.
+
+Adding a kind is a variant on the `Clue` union, a case in `applyClue`, an
+emitter in `allTrueClues`, a card, a description and a pool cap. The generator
+and the minimiser need nothing: they work on whatever `allTrueClues` produces.
+The property tests come along too, since they build their pool from the
+solution and assert that no rule ever contradicts it or eliminates a placement
+the solution uses.
+
+The exhaustive switches mean the compiler names most of the places to update.
+The two it cannot are the ones that iterate kinds rather than switch on them:
+`allTrueClues`, which would just never emit the new kind, and
+`layoutCluesByKind`, which held its own list of kinds and left the four new ones
+with no position at all — piled in the corner, unselectable, swallowing clicks
+meant for the cards beneath. That list is now derived from `CLUE_KINDS`, and a
+test gives the layout one clue of every kind and checks each gets a place.
+
 ## Difficulty
 
 Minimisation lands on 20–25 clues whatever the settings, so difficulty comes
@@ -63,11 +101,11 @@ clues are the easiest to act on and `between` clues force the longest chains of
 reasoning, so `DIFFICULTY_PRESETS` varies the pool caps and filters on the
 resulting clue count:
 
-| preset | clues | `between` share |
-| ------ | ----- | --------------- |
-| easy   | 23–28 | ~13%            |
-| medium | 20–25 | ~20%            |
-| hard   | 17–22 | ~43%            |
+| preset | clues | `between` + `next-to-either` share |
+| ------ | ----- | --------------------------------- |
+| easy   | 23–28 | ~10%                              |
+| medium | 20–25 | ~19%                              |
+| hard   | 19–22 | ~52%                              |
 
 ## The tiles
 

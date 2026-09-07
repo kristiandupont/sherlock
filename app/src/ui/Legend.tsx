@@ -1,4 +1,4 @@
-import type { Clue } from "../model/types";
+import { DEFAULT_SIZE, type Clue } from "../model/types";
 import { ClueCard } from "./ClueCard";
 import { describeClue } from "./clueLayout";
 
@@ -10,8 +10,12 @@ const EXAMPLES: Clue[] = [
   { kind: "same-column", a, b },
   { kind: "different-column", a, b },
   { kind: "adjacent", a, b },
+  { kind: "immediately-left-of", left: a, right: b },
   { kind: "left-of", left: a, right: b },
+  { kind: "apart", a, b, distance: 3 },
   { kind: "between", middle: b, a, b: c },
+  { kind: "next-to-either", a, b, c },
+  { kind: "at-an-end", a },
 ];
 
 export function Legend() {
@@ -35,7 +39,7 @@ export function Legend() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {EXAMPLES.map((clue) => (
           <div key={clue.kind} className="flex items-center gap-3">
-            <ClueCard clue={clue} used={false} />
+            <ClueCard clue={clue} size={DEFAULT_SIZE} used={false} />
             <span className="text-slate-600">{describeClue(clue)}</span>
           </div>
         ))}

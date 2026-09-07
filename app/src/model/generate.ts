@@ -18,6 +18,15 @@ import {
  */
 export type CluePoolCaps = Record<ClueKind, number>;
 
+/**
+ * The widest gap an `apart` clue will state. On a six-column board a distance
+ * of five leaves only one arrangement — the two ends — which says more than a
+ * `same-column` clue does, and the card needs four in-between columns drawn to
+ * say it. Two and three keep the clue in a middle band of strength, and keep
+ * the card narrow enough to read at a glance.
+ */
+const MAX_APART = 3;
+
 export type Difficulty = "easy" | "medium" | "hard";
 
 /**
@@ -31,15 +40,47 @@ export const DIFFICULTY_PRESETS: Record<
   { poolCaps: CluePoolCaps; clueRange: [number, number] }
 > = {
   easy: {
-    poolCaps: { "same-column": 90, adjacent: 70, "left-of": 60, between: 20, "different-column": 60 },
+    poolCaps: {
+      "same-column": 90,
+      adjacent: 70,
+      "left-of": 60,
+      between: 20,
+      "different-column": 60,
+      "immediately-left-of": 45,
+      apart: 45,
+      "at-an-end": 12,
+      "next-to-either": 25,
+    },
     clueRange: [23, 28],
   },
   medium: {
-    poolCaps: { "same-column": 90, adjacent: 55, "left-of": 55, between: 35, "different-column": 60 },
+    poolCaps: {
+      "same-column": 90,
+      adjacent: 55,
+      "left-of": 55,
+      between: 35,
+      "different-column": 60,
+      "immediately-left-of": 40,
+      apart: 45,
+      "at-an-end": 12,
+      "next-to-either": 40,
+    },
     clueRange: [20, 25],
   },
   hard: {
-    poolCaps: { "same-column": 8, adjacent: 8, "left-of": 10, between: 14, "different-column": 4 },
+    poolCaps: {
+      "same-column": 8,
+      adjacent: 6,
+      "left-of": 8,
+      between: 16,
+      "different-column": 4,
+      // The two most telling of the new kinds are rationed here, or they crowd
+      // out the clues that make a hard puzzle hard.
+      "immediately-left-of": 5,
+      apart: 6,
+      "at-an-end": 3,
+      "next-to-either": 26,
+    },
     clueRange: [17, 22],
   },
 };
@@ -96,11 +137,36 @@ export function allTrueClues(solution: Solution, allowSameRow = true): Clue[] {
       // says anything about them.
       if (!sameRow) clues.push({ kind: ca === cb ? "same-column" : "different-column", a, b });
       if (sameRow && !allowSameRow) continue;
-      if (Math.abs(ca - cb) === 1) clues.push({ kind: "adjacent", a, b });
+      const gap = Math.abs(ca - cb);
+      if (gap === 1) clues.push({ kind: "adjacent", a, b });
+      if (gap >= 2 && gap <= MAX_APART) clues.push({ kind: "apart", a, b, distance: gap });
       if (ca < cb) clues.push({ kind: "left-of", left: a, right: b });
       else if (cb < ca) clues.push({ kind: "left-of", left: b, right: a });
+      if (cb === ca + 1) clues.push({ kind: "immediately-left-of", left: a, right: b });
+      else if (ca === cb + 1) clues.push({ kind: "immediately-left-of", left: b, right: a });
     }
   }
+
+  for (const a of refs) {
+    const at = col(a);
+    if (at === 0 || at === size - 1) clues.push({ kind: "at-an-end", a });
+  }
+
+  // "next to one of these two". Pairs where both happen to neighbour `a` are
+  // included as well as pairs where only one does: leaving them out would make
+  // the clue quietly mean "next to exactly one of these", which is not what it
+  // says, and a player who noticed could use the difference.
+  for (const a of refs)
+    for (let i = 0; i < refs.length; i++)
+      for (let j = i + 1; j < refs.length; j++) {
+        const b = refs[i];
+        const c = refs[j];
+        if (b === a || c === a) continue;
+        const at = col(a);
+        if (Math.abs(at - col(b)) !== 1 && Math.abs(at - col(c)) !== 1) continue;
+        if (!allowSameRow && (a.row === b.row || a.row === c.row || b.row === c.row)) continue;
+        clues.push({ kind: "next-to-either", a, b, c });
+      }
 
   for (const middle of refs) {
     const cm = col(middle);

@@ -27,6 +27,28 @@ const Column = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
+/** One way only: this pair is adjacent and in this order. */
+const ThisWayRound = () => (
+  <svg width="20" height="9" viewBox="0 0 20 9" className="text-slate-400">
+    <path d="M2 4.5h13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <path d="M14 1.5l4 3-4 3Z" fill="currentColor" />
+  </svg>
+);
+
+/** A miniature of the row, with the two columns the tile could be in marked. */
+const Ends = ({ size }: { size: number }) => (
+  <div className="flex gap-px">
+    {Array.from({ length: size }, (_, column) => (
+      <div
+        key={column}
+        className={`h-2.5 w-1.5 rounded-[1px] ${
+          column === 0 || column === size - 1 ? "bg-slate-500" : "bg-slate-200"
+        }`}
+      />
+    ))}
+  </div>
+);
+
 /** Either order: the pair is adjacent but which one is on the left is unknown. */
 const EitherOrder = () => (
   <svg width="20" height="9" viewBox="0 0 20 9" className="text-slate-400">
@@ -55,7 +77,16 @@ const NotSame = () => (
   </svg>
 );
 
-export function ClueCard({ clue, used }: { clue: Clue; used: boolean }) {
+export function ClueCard({
+  clue,
+  used,
+  size,
+}: {
+  clue: Clue;
+  used: boolean;
+  /** Columns on the board, for the clue that draws a miniature of a row. */
+  size: number;
+}) {
   const { width, height } = cardSize(clue);
 
   const body = () => {
@@ -102,6 +133,52 @@ export function ClueCard({ clue, used }: { clue: Clue; used: boolean }) {
               <Cell of={clue.b} />
             </Row>
             <EitherOrder />
+          </div>
+        );
+      case "immediately-left-of":
+        return (
+          <div className="flex flex-col items-center gap-0.5">
+            <Row>
+              <Cell of={clue.left} />
+              <Cell of={clue.right} />
+            </Row>
+            <ThisWayRound />
+          </div>
+        );
+      case "apart":
+        // The same card as `adjacent`, with the columns that stand between the
+        // pair drawn as empty cells. A bare number could not say whether it
+        // counted the columns between them or the distance from one to the
+        // other.
+        return (
+          <div className="flex flex-col items-center gap-0.5">
+            <Row>
+              <Cell of={clue.a} />
+              {Array.from({ length: clue.distance - 1 }, (_, column) => (
+                <div key={column} className="w-3 self-stretch bg-slate-100" />
+              ))}
+              <Cell of={clue.b} />
+            </Row>
+            <EitherOrder />
+          </div>
+        );
+      case "at-an-end":
+        return (
+          <div className="flex flex-col items-center gap-1.5">
+            <Cell of={clue.a} />
+            <Ends size={size} />
+          </div>
+        );
+      case "next-to-either":
+        return (
+          <div className="flex items-center gap-1">
+            <Cell of={clue.a} />
+            <EitherOrder />
+            <div className="flex items-center gap-1 rounded border border-dashed border-slate-400 px-1">
+              <Cell of={clue.b} />
+              <span className="text-[10px] italic text-slate-400">or</span>
+              <Cell of={clue.c} />
+            </div>
           </div>
         );
     }

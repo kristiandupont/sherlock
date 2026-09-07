@@ -104,6 +104,68 @@ describe("individual rules", () => {
     expect(ok).toBe(false);
   });
 
+  it("immediately-left-of puts the pair in that order", () => {
+    const { pos } = narrow([{ kind: "immediately-left-of", left: a, right: b }], (p) => {
+      p[tileId(a, size)] = bit(1);
+    });
+    expect(pos[tileId(b, size)]).toBe(bit(2));
+  });
+
+  it("immediately-left-of rejects the pair the other way round", () => {
+    const { ok } = narrow([{ kind: "immediately-left-of", left: a, right: b }], (p) => {
+      p[tileId(a, size)] = bit(2);
+      p[tileId(b, size)] = bit(1);
+    });
+    expect(ok).toBe(false);
+  });
+
+  it("apart allows the distance on either side", () => {
+    const { pos } = narrow([{ kind: "apart", a, b, distance: 2 }], (p) => {
+      p[tileId(a, size)] = bit(1);
+    });
+    // Column 3 is two to the right; two to the left would be off the board.
+    expect(pos[tileId(b, size)]).toBe(bit(3));
+  });
+
+  it("apart does not let a distance run off the end of the board", () => {
+    const { pos } = narrow([{ kind: "apart", a, b, distance: 3 }], (p) => {
+      p[tileId(a, size)] = bit(3);
+    });
+    expect(pos[tileId(b, size)]).toBe(bit(0));
+  });
+
+  it("at-an-end keeps only the first and last columns", () => {
+    const { pos } = narrow([{ kind: "at-an-end", a }], () => {});
+    expect(pos[tileId(a, size)]).toBe(bit(0) | bit(size - 1));
+  });
+
+  it("next-to-either narrows to what either of the pair could neighbour", () => {
+    const { pos } = narrow([{ kind: "next-to-either", a, b, c }], (p) => {
+      p[tileId(b, size)] = bit(0);
+      p[tileId(c, size)] = bit(3);
+    });
+    expect(pos[tileId(a, size)]).toBe(bit(1) | bit(2));
+  });
+
+  it("next-to-either pins the other one when the first cannot reach", () => {
+    const { pos } = narrow([{ kind: "next-to-either", a, b, c }], (p) => {
+      p[tileId(a, size)] = bit(0);
+      p[tileId(b, size)] = bit(3);
+    });
+    // `b` is too far away, so `c` is the one that has to be the neighbour.
+    expect(pos[tileId(c, size)]).toBe(bit(1));
+    expect(pos[tileId(b, size)]).toBe(bit(3));
+  });
+
+  it("next-to-either fails when neither of the pair can reach", () => {
+    const { ok } = narrow([{ kind: "next-to-either", a, b, c }], (p) => {
+      p[tileId(a, size)] = bit(0);
+      p[tileId(b, size)] = bit(3);
+      p[tileId(c, size)] = bit(3);
+    });
+    expect(ok).toBe(false);
+  });
+
   it("different-column only fires once one side is pinned", () => {
     const { pos } = narrow([{ kind: "different-column", a, b }], (p) => {
       p[tileId(a, size)] = bit(2);

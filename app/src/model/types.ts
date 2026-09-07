@@ -18,7 +18,19 @@ export type Clue =
   /** `left` occupies a column somewhere left of `right`, not necessarily next to it. */
   | { kind: "left-of"; left: TileRef; right: TileRef }
   /** `middle` sits in the column directly between `a` and `b`, which may be either way round. */
-  | { kind: "between"; middle: TileRef; a: TileRef; b: TileRef };
+  | { kind: "between"; middle: TileRef; a: TileRef; b: TileRef }
+  /** `left` occupies the column immediately before `right`. */
+  | { kind: "immediately-left-of"; left: TileRef; right: TileRef }
+  /**
+   * `a` and `b` are exactly `distance` columns apart, in either order — that is
+   * `distance - 1` columns stand between them, which is what the card draws.
+   * Always 2 or more, since a distance of 1 is `adjacent`.
+   */
+  | { kind: "apart"; a: TileRef; b: TileRef; distance: number }
+  /** `a` occupies either the first or the last column. */
+  | { kind: "at-an-end"; a: TileRef }
+  /** `a` neighbours `b`, or `c`, or both. Which one is not said. */
+  | { kind: "next-to-either"; a: TileRef; b: TileRef; c: TileRef };
 
 export type ClueKind = Clue["kind"];
 
@@ -28,6 +40,10 @@ export const CLUE_KINDS: ClueKind[] = [
   "adjacent",
   "left-of",
   "between",
+  "immediately-left-of",
+  "apart",
+  "at-an-end",
+  "next-to-either",
 ];
 
 /** `solution[row][col]` is the index of the tile from `row` placed in `col`. */
@@ -48,15 +64,28 @@ export const tileRef = (id: number, size: number): TileRef => ({
   tile: id % size,
 });
 
-/** Every tile a clue mentions, in display order. */
+/**
+ * Every tile a clue mentions, in display order. Deliberately without a
+ * `default` case: clue kinds do not share a shape, so a new one must be
+ * answered for here rather than falling through to a guess.
+ */
 export function clueTiles(clue: Clue): TileRef[] {
   switch (clue.kind) {
+    case "same-column":
+    case "different-column":
+    case "adjacent":
+      return [clue.a, clue.b];
     case "left-of":
+    case "immediately-left-of":
       return [clue.left, clue.right];
     case "between":
       return [clue.a, clue.middle, clue.b];
-    default:
+    case "apart":
       return [clue.a, clue.b];
+    case "at-an-end":
+      return [clue.a];
+    case "next-to-either":
+      return [clue.a, clue.b, clue.c];
   }
 }
 

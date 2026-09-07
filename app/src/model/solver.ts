@@ -119,6 +119,60 @@ export function applyClue(pos: PosMask, clue: Clue, size: number): RuleEffect {
       pos[b] = nb;
       return "changed";
     }
+    case "immediately-left-of": {
+      const l = tileId(clue.left, size);
+      const r = tileId(clue.right, size);
+      const nl = pos[l] & shiftDown(pos[r]);
+      const nr = pos[r] & shiftUp(pos[l], size);
+      if (nl === 0 || nr === 0) return "contradiction";
+      if (nl === pos[l] && nr === pos[r]) return "unchanged";
+      pos[l] = nl;
+      pos[r] = nr;
+      return "changed";
+    }
+    case "apart": {
+      const a = tileId(clue.a, size);
+      const b = tileId(clue.b, size);
+      // Either side of every column the other tile could be in.
+      const spread = (mask: number) => (((mask << clue.distance) & full) | (mask >> clue.distance));
+      const na = pos[a] & spread(pos[b]);
+      const nb = pos[b] & spread(pos[a]);
+      if (na === 0 || nb === 0) return "contradiction";
+      if (na === pos[a] && nb === pos[b]) return "unchanged";
+      pos[a] = na;
+      pos[b] = nb;
+      return "changed";
+    }
+    case "at-an-end": {
+      const a = tileId(clue.a, size);
+      const na = pos[a] & (1 | (1 << (size - 1)));
+      if (na === 0) return "contradiction";
+      if (na === pos[a]) return "unchanged";
+      pos[a] = na;
+      return "changed";
+    }
+    case "next-to-either": {
+      const a = tileId(clue.a, size);
+      const b = tileId(clue.b, size);
+      const c = tileId(clue.c, size);
+      const na = pos[a] & (neighbours(pos[b], size) | neighbours(pos[c], size));
+      if (na === 0) return "contradiction";
+
+      // Whichever of the pair still could neighbour `a` is not pinned down by
+      // this clue. But if one of them cannot, the other one has to, and that
+      // narrows it.
+      const reach = neighbours(na, size);
+      let nb = pos[b];
+      let nc = pos[c];
+      if ((pos[b] & reach) === 0) nc = pos[c] & reach;
+      if ((pos[c] & reach) === 0) nb = pos[b] & reach;
+      if (nb === 0 || nc === 0) return "contradiction";
+      if (na === pos[a] && nb === pos[b] && nc === pos[c]) return "unchanged";
+      pos[a] = na;
+      pos[b] = nb;
+      pos[c] = nc;
+      return "changed";
+    }
   }
 }
 
@@ -293,6 +347,18 @@ export function clueHolds(clue: Clue, solution: Solution): boolean {
       const a = col(clue.a);
       const b = col(clue.b);
       return (a === m - 1 && b === m + 1) || (b === m - 1 && a === m + 1);
+    }
+    case "immediately-left-of":
+      return col(clue.left) + 1 === col(clue.right);
+    case "apart":
+      return Math.abs(col(clue.a) - col(clue.b)) === clue.distance;
+    case "at-an-end": {
+      const at = col(clue.a);
+      return at === 0 || at === solution[clue.a.row].length - 1;
+    }
+    case "next-to-either": {
+      const at = col(clue.a);
+      return Math.abs(at - col(clue.b)) === 1 || Math.abs(at - col(clue.c)) === 1;
     }
   }
 }

@@ -378,6 +378,7 @@ export default function App() {
           <ClueCanvas
             key={game.puzzle.seed}
             clues={game.puzzle.clues}
+            size={game.puzzle.size}
             positions={game.positions}
             used={game.used}
             onMove={moveClue}

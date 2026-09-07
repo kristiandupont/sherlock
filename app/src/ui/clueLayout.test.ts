@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Clue } from "../model/types";
+import { CLUE_KINDS, type Clue } from "../model/types";
 import {
   cardSize,
   cluesWithin,
@@ -68,6 +68,55 @@ describe("cluesWithin", () => {
 
   it("skips clues that have not been placed yet", () => {
     expect(cluesWithin(clues, [], { x: -5, y: -5, width: 999, height: 999 })).toEqual([]);
+  });
+});
+
+describe("cardSize", () => {
+  it("widens an apart card by one column per column it has to draw", () => {
+    const two = cardSize({ kind: "apart", a, b, distance: 2 });
+    const three = cardSize({ kind: "apart", a, b, distance: 3 });
+    expect(three.width - two.width).toBe(14);
+    expect(three.height).toBe(two.height);
+  });
+});
+
+describe("layoutCluesByKind", () => {
+  it("finds a place for every clue, whatever its kind", () => {
+    // One of each: a kind missing from the grouping order would be left without
+    // a position and pile up in the corner, invisible under the others.
+    const everyKind: Clue[] = [
+      { kind: "same-column", a, b },
+      { kind: "different-column", a, b },
+      { kind: "adjacent", a, b },
+      { kind: "left-of", left: a, right: b },
+      { kind: "between", middle: b, a, b: c },
+      { kind: "immediately-left-of", left: a, right: b },
+      { kind: "apart", a, b, distance: 2 },
+      { kind: "at-an-end", a },
+      { kind: "next-to-either", a, b, c },
+    ];
+    expect(everyKind.map((clue) => clue.kind).sort()).toEqual([...CLUE_KINDS].sort());
+
+    const positions = layoutCluesByKind(everyKind, 400);
+    expect(positions).toHaveLength(everyKind.length);
+    for (const [index, point] of positions.entries())
+      expect(point, `${everyKind[index].kind} was left unplaced`).toBeDefined();
+  });
+
+  it("keeps each kind together, in one unbroken run", () => {
+    const many: Clue[] = [
+      { kind: "same-column", a, b },
+      { kind: "at-an-end", a },
+      { kind: "same-column", a, b: c },
+      { kind: "at-an-end", a: b },
+    ];
+    const positions = layoutCluesByKind(many, 400);
+    const reading = many
+      .map((clue, index) => ({ kind: clue.kind, ...positions[index] }))
+      .sort((p, q) => p.y - q.y || p.x - q.x)
+      .map((entry) => entry.kind);
+    const runs = reading.filter((kind, index) => kind !== reading[index - 1]);
+    expect(runs).toEqual(["same-column", "at-an-end"]);
   });
 });
 

@@ -11,6 +11,8 @@ import {
 
 type Props = {
   clues: Clue[];
+  /** Columns on the board, which one of the clue cards draws a miniature of. */
+  size: number;
   positions: Point[];
   used: boolean[];
   /** Called once a drag finishes, with every card that drag carried. */
@@ -48,7 +50,7 @@ type Band = {
   base: Set<number>;
 };
 
-export function ClueCanvas({ clues, positions, used, onMove, onToggleUsed, highlight }: Props) {
+export function ClueCanvas({ clues, size, positions, used, onMove, onToggleUsed, highlight }: Props) {
   const [cardDrag, setCardDrag] = useState<CardDrag | null>(null);
   const [band, setBand] = useState<Band | null>(null);
   const [selection, setSelection] = useState<Set<number>>(new Set());
@@ -357,7 +359,7 @@ export function ClueCanvas({ clues, positions, used, onMove, onToggleUsed, highl
                     onToggleUsed(index);
                   }}
                 >
-                  <ClueCard clue={clue} used={(used[index] ?? false) && !hinted} />
+                  <ClueCard clue={clue} size={size} used={(used[index] ?? false) && !hinted} />
                 </div>
               );
             })}

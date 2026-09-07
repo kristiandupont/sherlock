@@ -1,4 +1,4 @@
-import type { Clue } from "../model/types";
+import { CLUE_KINDS, type Clue, type ClueKind } from "../model/types";
 import { tileName } from "./tileSets";
 
 export type Point = { x: number; y: number };
@@ -21,10 +21,39 @@ export function cardSize(clue: Clue): { width: number; height: number } {
       return { width: 116, height: 56 };
     case "between":
       return { width: 138, height: 72 };
+    case "immediately-left-of":
+      return { width: 96, height: 72 };
+    case "apart":
+      // One cell per column standing between the pair.
+      return { width: 96 + 14 * (clue.distance - 1), height: 72 };
+    case "at-an-end":
+      return { width: 62, height: 76 };
+    case "next-to-either":
+      return { width: 168, height: 56 };
   }
 }
 
 const GAP = 12;
+
+/**
+ * The order the kinds are grouped in, roughly from the plainest to the most
+ * involved. Anything missing from the list is appended rather than dropped: a
+ * clue with no position would be rendered in the corner, on top of the others.
+ */
+const KIND_ORDER: ClueKind[] = (() => {
+  const preferred: ClueKind[] = [
+    "same-column",
+    "different-column",
+    "at-an-end",
+    "adjacent",
+    "immediately-left-of",
+    "apart",
+    "left-of",
+    "between",
+    "next-to-either",
+  ];
+  return [...preferred, ...CLUE_KINDS.filter((kind) => !preferred.includes(kind))];
+})();
 
 /**
  * The starting arrangement: cards grouped by kind, each kind on its own row.
@@ -32,12 +61,11 @@ const GAP = 12;
  * the canvas, so nothing rearranges them again.
  */
 export function layoutCluesByKind(clues: Clue[], width: number): Point[] {
-  const order = ["same-column", "different-column", "adjacent", "left-of", "between"] as const;
   const positions = new Array<Point>(clues.length);
   const usable = Math.max(width - GAP, 200);
   let y = GAP;
 
-  for (const kind of order) {
+  for (const kind of KIND_ORDER) {
     const indices = clues.map((clue, index) => ({ clue, index })).filter((e) => e.clue.kind === kind);
     if (indices.length === 0) continue;
     let x = GAP;
@@ -71,6 +99,18 @@ export function describeClue(clue: Clue): string {
       return `${name(clue.left)} is somewhere left of ${name(clue.right)}`;
     case "between":
       return `${name(clue.middle)} is directly between ${name(clue.a)} and ${name(clue.b)}, in either order`;
+    case "immediately-left-of":
+      return `${name(clue.left)} is in the column directly left of ${name(clue.right)}`;
+    case "apart": {
+      const between = clue.distance - 1;
+      return `${name(clue.a)} and ${name(clue.b)} have ${between} column${
+        between === 1 ? "" : "s"
+      } between them, in either order`;
+    }
+    case "at-an-end":
+      return `${name(clue.a)} is in the first or the last column`;
+    case "next-to-either":
+      return `${name(clue.a)} is next to ${name(clue.b)} or next to ${name(clue.c)}`;
   }
 }
 

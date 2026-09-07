@@ -106,6 +106,18 @@ describe("generatePuzzle", () => {
     expect(Math.max(leftFirst, rightFirst) / Math.min(leftFirst, rightFirst)).toBeLessThan(2);
   });
 
+  it("never states a gap too wide to draw legibly", () => {
+    const solution = randomSolution(6, makeRng(31));
+    const distances = allTrueClues(solution)
+      .filter((clue) => clue.kind === "apart")
+      .map((clue) => (clue.kind === "apart" ? clue.distance : 0));
+    expect(distances.length).toBeGreaterThan(0);
+    expect(Math.min(...distances)).toBe(2);
+    // A distance of 5 on a six-column board leaves only the two ends, which is
+    // a stronger statement than the card looks like it is making.
+    expect(Math.max(...distances)).toBeLessThanOrEqual(3);
+  });
+
   it("works on smaller grids", () => {
     for (const size of [4, 5]) {
       const puzzle = generatePuzzle({ seed: 5, size, clueRange: null });
