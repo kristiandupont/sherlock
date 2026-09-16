@@ -29,7 +29,8 @@ export function cardSize(clue: Clue): { width: number; height: number } {
     case "at-an-end":
       return { width: 62, height: 76 };
     case "next-to-either":
-      return { width: 168, height: 56 };
+      // Tall enough for the arrow under the row, like the other pair cards.
+      return { width: 168, height: 72 };
   }
 }
 

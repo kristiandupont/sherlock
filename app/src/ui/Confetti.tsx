@@ -6,9 +6,16 @@ type Props = {
   onDone: () => void;
 };
 
-const DURATION_MS = 3400;
-const FADE_FROM = 0.65;
+const DURATION_MS = 7200;
+const FADE_FROM = 0.78;
 const PER_CANNON = 70;
+/**
+ * A piece thrown from the bottom of the window is back past it about two and a
+ * half seconds later, so a single burst cannot fill the run. The cannons fire
+ * again at these times instead, spaced so the next volley goes up while the one
+ * before it is still coming down.
+ */
+const VOLLEYS_MS = [0, 1800, 3600];
 const GRAVITY = 0.32;
 const DRAG = 0.994;
 
@@ -23,12 +30,14 @@ type Piece = {
   height: number;
   colour: string;
   round: boolean;
+  /** Milliseconds into the run at which this piece leaves its cannon. */
+  firedAt: number;
 };
 
 /** The tile colours, so the celebration belongs to this game rather than any game. */
 const COLOURS = ROWS.map((row) => row.color);
 
-function makePieces(width: number, height: number): Piece[] {
+function makePieces(width: number, height: number, firedAt: number): Piece[] {
   const pieces: Piece[] = [];
   const cannons = [
     { x: width * 0.12, aim: -Math.PI / 3 },
@@ -50,6 +59,7 @@ function makePieces(width: number, height: number): Piece[] {
         height: 8 + Math.random() * 8,
         colour: COLOURS[Math.floor(Math.random() * COLOURS.length)],
         round: Math.random() < 0.25,
+        firedAt,
       });
     }
   return pieces;
@@ -74,7 +84,7 @@ export function Confetti({ onDone }: Props) {
     canvas.height = height * ratio;
     context.scale(ratio, ratio);
 
-    const pieces = makePieces(width, height);
+    const pieces = VOLLEYS_MS.flatMap((firedAt) => makePieces(width, height, firedAt));
     const start = performance.now();
     let frame = 0;
 
@@ -91,6 +101,7 @@ export function Confetti({ onDone }: Props) {
         progress < FADE_FROM ? 1 : 1 - (progress - FADE_FROM) / (1 - FADE_FROM);
 
       for (const piece of pieces) {
+        if (elapsed < piece.firedAt) continue;
         piece.vy += GRAVITY;
         piece.vx *= DRAG;
         piece.vy *= DRAG;

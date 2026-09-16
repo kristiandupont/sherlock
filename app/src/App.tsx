@@ -8,7 +8,7 @@ import {
   type BoardState,
 } from "./game/board";
 import { findHints, type Hint } from "./game/hint";
-import { firstBrokenIndex, rewindToLastGood } from "./game/history";
+import { firstBrokenIndex, rewindToLastGood, type Snapshot } from "./game/history";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
 import { Board, type InteractionMode } from "./ui/Board";
@@ -18,7 +18,7 @@ import { Legend } from "./ui/Legend";
 import { layoutCluesByKind, type Point } from "./ui/clueLayout";
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
-const STORAGE_KEY = "sherlock:game:v3";
+const STORAGE_KEY = "sherlock:game:v4";
 
 /**
  * A wrong move is not reported straight away — that would amount to a hint on
@@ -40,31 +40,32 @@ const HINT_VISIBLE_MS = 4500;
 type Game = {
   difficulty: Difficulty;
   puzzle: Puzzle;
-  /** Board states oldest to newest; the last one is what the player sees. */
-  history: BoardState[];
+  /**
+   * Snapshots oldest to newest; the last one is what the player sees. Where the
+   * cards lie is not part of a snapshot: arranging the canvas is not a move, and
+   * undo moving cards the player had just tidied up would be a nuisance.
+   */
+  history: Snapshot[];
   positions: Point[];
-  used: boolean[];
 };
 
 type Saved = {
   difficulty: Difficulty;
   seed: number;
   size: number;
-  /** Every board of the history, oldest first, so undo and rewind survive a reload. */
-  history: Array<{ cells: number[][]; placed: boolean[][] }>;
+  /** Every snapshot of the history, oldest first, so undo and rewind survive a reload. */
+  history: Array<{ cells: number[][]; placed: boolean[][]; used: boolean[] }>;
   positions: Point[];
-  used: boolean[];
 };
+
+const startSnapshot = (puzzle: Puzzle): Snapshot => ({
+  board: emptyBoard(puzzle.size),
+  used: puzzle.clues.map(() => false),
+});
 
 function startGame(difficulty: Difficulty): Game {
   const puzzle = generatePuzzle({ difficulty });
-  return {
-    difficulty,
-    puzzle,
-    history: [emptyBoard(puzzle.size)],
-    positions: [],
-    used: puzzle.clues.map(() => false),
-  };
+  return { difficulty, puzzle, history: [startSnapshot(puzzle)], positions: [] };
 }
 
 /** A puzzle is fully determined by its seed and difficulty, so only those are stored. */
@@ -75,15 +76,18 @@ function loadGame(): Game | null {
     const saved = JSON.parse(raw) as Saved;
     if (!DIFFICULTIES.includes(saved.difficulty)) return null;
     const puzzle = generatePuzzle({ seed: saved.seed, difficulty: saved.difficulty, size: saved.size });
-    if (puzzle.seed !== saved.seed || puzzle.clues.length !== saved.used.length) return null;
+    if (puzzle.seed !== saved.seed) return null;
     if (!Array.isArray(saved.history) || saved.history.length === 0) return null;
     if (saved.history.some((state) => !state?.cells || !state?.placed)) return null;
+    if (saved.history.some((state) => state.used?.length !== puzzle.clues.length)) return null;
     return {
       difficulty: saved.difficulty,
       puzzle,
-      history: saved.history.map(({ cells, placed }) => ({ size: saved.size, cells, placed })),
+      history: saved.history.map(({ cells, placed, used }) => ({
+        board: { size: saved.size, cells, placed },
+        used,
+      })),
       positions: saved.positions,
-      used: saved.used,
     };
   } catch {
     return null;
@@ -107,7 +111,7 @@ export default function App() {
   const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  const board = game.history[game.history.length - 1];
+  const { board, used } = game.history[game.history.length - 1];
   const solved = useMemo(() => isSolved(board, game.puzzle.solution), [board, game.puzzle]);
   const complete = useMemo(() => isComplete(board), [board]);
   const [celebrating, setCelebrating] = useState(false);
@@ -182,9 +186,8 @@ export default function App() {
       difficulty: game.difficulty,
       seed: game.puzzle.seed,
       size: game.puzzle.size,
-      history: game.history.map(({ cells, placed }) => ({ cells, placed })),
+      history: game.history.map(({ board: { cells, placed }, used }) => ({ cells, placed, used })),
       positions: game.positions,
-      used: game.used,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
@@ -196,11 +199,12 @@ export default function App() {
   const pushBoard = useCallback((next: BoardState) => {
     setHint(null);
     setHintCursor(0);
-    setGame((current) =>
-      next === current.history[current.history.length - 1]
+    setGame((current) => {
+      const last = current.history[current.history.length - 1];
+      return next === last.board
         ? current
-        : { ...current, history: [...current.history, next] },
-    );
+        : { ...current, history: [...current.history, { board: next, used: last.used }] };
+    });
   }, []);
 
   const handlePlace = (row: number, col: number, tile: number) =>
@@ -222,7 +226,7 @@ export default function App() {
 
   const restart = () => {
     clearNotices();
-    setGame((current) => ({ ...current, history: [emptyBoard(current.puzzle.size)] }));
+    setGame((current) => ({ ...current, history: [startSnapshot(current.puzzle)] }));
   };
 
   const newGame = (difficulty: Difficulty) => {
@@ -254,7 +258,7 @@ export default function App() {
       revealNotice();
       return;
     }
-    const hints = findHints(board, game.puzzle.clues, game.used);
+    const hints = findHints(board, game.puzzle.clues, used);
     if (hints.length === 0) return;
     const pick = hints[hintCursor % hints.length];
     setHintCursor((cursor) => cursor + 1);
@@ -273,11 +277,17 @@ export default function App() {
     });
   }, []);
 
+  /**
+   * Greying a clue out is a step of the game, so it goes onto the history on top
+   * of the board it was decided against. Undo and "Go back" then restore which
+   * clues were still in play as well as the grid.
+   */
   const toggleUsed = useCallback((index: number) => {
     setGame((current) => {
-      const used = current.used.slice();
+      const last = current.history[current.history.length - 1];
+      const used = last.used.slice();
       used[index] = !used[index];
-      return { ...current, used };
+      return { ...current, history: [...current.history, { board: last.board, used }] };
     });
   }, []);
 
@@ -380,7 +390,7 @@ export default function App() {
             clues={game.puzzle.clues}
             size={game.puzzle.size}
             positions={game.positions}
-            used={game.used}
+            used={used}
             onMove={moveClue}
             onToggleUsed={toggleUsed}
             highlight={hint?.kind === "clue" ? hint.clueIndex : null}

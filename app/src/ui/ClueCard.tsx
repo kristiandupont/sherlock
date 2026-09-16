@@ -171,14 +171,16 @@ export function ClueCard({
         );
       case "next-to-either":
         return (
-          <div className="flex items-center gap-1">
-            <Cell of={clue.a} />
-            <EitherOrder />
-            <div className="flex items-center gap-1 rounded border border-dashed border-slate-400 px-1">
-              <Cell of={clue.b} />
-              <span className="text-[10px] italic text-slate-400">or</span>
-              <Cell of={clue.c} />
+          <div className="flex flex-col items-center gap-0.5">
+            <div className="flex items-center gap-1">
+              <Cell of={clue.a} />
+              <div className="flex items-center gap-1 rounded border border-dashed border-slate-400 px-1">
+                <Cell of={clue.b} />
+                <span className="text-[10px] italic text-slate-400">or</span>
+                <Cell of={clue.c} />
+              </div>
             </div>
+            <EitherOrder />
           </div>
         );
     }
