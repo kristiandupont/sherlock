@@ -1,3 +1,4 @@
+import { makeRng, type Rng } from "../model/rng";
 import { CLUE_KINDS, type Clue, type ClueKind } from "../model/types";
 import { tileName } from "./tileSets";
 
@@ -33,6 +34,62 @@ export function cardSize(clue: Clue): { width: number; height: number } {
       return { width: 168, height: 72 };
   }
 }
+
+/**
+ * The axis a card can be mirrored along without changing what it says, or
+ * `null` for a card that cannot be mirrored at all. A clue whose whole content
+ * is a direction — `left-of`, `immediately-left-of` — would say something else
+ * reversed, and a one-tile card has nothing to reverse.
+ *
+ * Mirroring is for the player's benefit only: it lets them put the shared
+ * symbol of two clues next to each other so the eye can follow a chain of them
+ * across the canvas. The clue itself is untouched, so the solver and the hints
+ * never see the difference.
+ */
+export function flipAxis(clue: Clue): "horizontal" | "vertical" | null {
+  switch (clue.kind) {
+    // Drawn as a vertical stack of two tiles, either way up.
+    case "same-column":
+    case "different-column":
+      return "vertical";
+    // Drawn as a row whose order the clue does not fix.
+    case "adjacent":
+    case "apart":
+    case "between":
+    case "next-to-either":
+      return "horizontal";
+    case "left-of":
+    case "immediately-left-of":
+    case "at-an-end":
+      return null;
+  }
+}
+
+export const canFlip = (clue: Clue): boolean => flipAxis(clue) !== null;
+
+/**
+ * A starting orientation for each card, mirrored or not at random, so that a
+ * kind of card does not always look the same.
+ *
+ * Two regularities to break. A `next-to-either` card always draws its single
+ * tile on the left and the pair it might neighbour on the right, so a row of
+ * them reads as one shape. And `allTrueClues` builds every pair clue from two
+ * tiles in row order, which puts the earlier row on the left of every
+ * `adjacent` and `apart` card and on top of every `same-column` one.
+ *
+ * Neither says anything about the solution — `maskBetweenOrder` in the
+ * generator is what keeps the one clue whose build order would have given the
+ * answer away from doing so — but both make the canvas harder to read.
+ *
+ * Seeded from the puzzle's own seed, so a puzzle looks the same each time it is
+ * opened.
+ */
+export function randomFlips(clues: Clue[], rng: Rng): boolean[] {
+  return clues.map((clue) => canFlip(clue) && rng() < 0.5);
+}
+
+export const flipsForPuzzle = (clues: Clue[], seed: number): boolean[] =>
+  randomFlips(clues, makeRng(seed));
 
 const GAP = 12;
 
@@ -87,29 +144,49 @@ export function layoutCluesByKind(clues: Clue[], width: number): Point[] {
   return positions;
 }
 
-export function describeClue(clue: Clue): string {
+/**
+ * The card in words, for the tooltip and the accessible name. `flipped` names
+ * the pair in the order the card draws them, so the text and the picture agree
+ * about which tile is which when a player reads both.
+ */
+export function describeClue(clue: Clue, flipped = false): string {
   const name = (ref: { row: number; tile: number }) => tileName(ref.row, ref.tile);
+  /** The two tiles of a symmetric pair, in the order the card draws them. */
+  const pair = (a: { row: number; tile: number }, b: { row: number; tile: number }) =>
+    flipped ? ([name(b), name(a)] as const) : ([name(a), name(b)] as const);
   switch (clue.kind) {
-    case "same-column":
-      return `${name(clue.a)} and ${name(clue.b)} are in the same column`;
-    case "different-column":
-      return `${name(clue.a)} and ${name(clue.b)} are not in the same column`;
-    case "adjacent":
-      return `${name(clue.a)} and ${name(clue.b)} are in neighbouring columns`;
+    case "same-column": {
+      const [first, second] = pair(clue.a, clue.b);
+      return `${first} and ${second} are in the same column`;
+    }
+    case "different-column": {
+      const [first, second] = pair(clue.a, clue.b);
+      return `${first} and ${second} are not in the same column`;
+    }
+    case "adjacent": {
+      const [first, second] = pair(clue.a, clue.b);
+      return `${first} and ${second} are in neighbouring columns`;
+    }
     case "left-of":
       return `${name(clue.left)} is somewhere left of ${name(clue.right)}`;
-    case "between":
-      return `${name(clue.middle)} is directly between ${name(clue.a)} and ${name(clue.b)}, in either order`;
+    case "between": {
+      const [first, second] = pair(clue.a, clue.b);
+      return `${name(clue.middle)} is directly between ${first} and ${second}, in either order`;
+    }
     case "immediately-left-of":
       return `${name(clue.left)} is in the column directly left of ${name(clue.right)}`;
     case "apart": {
       const between = clue.distance - 1;
-      return `${name(clue.a)} and ${name(clue.b)} have ${between} column${
+      const [first, second] = pair(clue.a, clue.b);
+      return `${first} and ${second} have ${between} column${
         between === 1 ? "" : "s"
       } between them, in either order`;
     }
     case "at-an-end":
       return `${name(clue.a)} is in the first or the last column`;
+    // Mirroring this card moves the lone tile to the other side of the pair
+    // rather than reordering two tiles, and which side it sits on says nothing,
+    // so the sentence reads the same either way.
     case "next-to-either":
       return `${name(clue.a)} is next to ${name(clue.b)} or next to ${name(clue.c)}`;
   }

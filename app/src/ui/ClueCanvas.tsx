@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { Clue } from "../model/types";
 import { ClueCard } from "./ClueCard";
 import {
+  canFlip,
   cluesWithin,
   contentBounds,
   fitZoom,
@@ -15,9 +16,13 @@ type Props = {
   size: number;
   positions: Point[];
   used: boolean[];
+  /** Which cards are drawn mirrored. */
+  flipped: boolean[];
   /** Called once a drag finishes, with every card that drag carried. */
   onMove: (moves: Array<{ index: number; point: Point }>) => void;
   onToggleUsed: (index: number) => void;
+  /** Mirrors every card in the list, which right-clicking a card asks for. */
+  onFlip: (indices: number[]) => void;
   /** Index of the clue the hint points at, ringed and scrolled into view. */
   highlight: number | null;
 };
@@ -50,7 +55,17 @@ type Band = {
   base: Set<number>;
 };
 
-export function ClueCanvas({ clues, size, positions, used, onMove, onToggleUsed, highlight }: Props) {
+export function ClueCanvas({
+  clues,
+  size,
+  positions,
+  used,
+  flipped,
+  onMove,
+  onToggleUsed,
+  onFlip,
+  highlight,
+}: Props) {
   const [cardDrag, setCardDrag] = useState<CardDrag | null>(null);
   const [band, setBand] = useState<Band | null>(null);
   const [selection, setSelection] = useState<Set<number>>(new Set());
@@ -355,11 +370,23 @@ export function ClueCanvas({ clues, size, positions, used, onMove, onToggleUsed,
                   onPointerUp={endCardDrag}
                   onPointerCancel={endCardDrag}
                   onContextMenu={(event) => {
+                    // Right-click mirrors the card, on the same rule as
+                    // dragging: one that is part of the selection carries the
+                    // rest of it, any other card goes on its own. Cards whose
+                    // meaning is a direction cannot be mirrored and are dropped
+                    // from the list rather than left saying the opposite.
                     event.preventDefault();
-                    onToggleUsed(index);
+                    const carried = selected ? [...selection] : [index];
+                    const flippable = carried.filter((i) => clues[i] && canFlip(clues[i]));
+                    if (flippable.length > 0) onFlip(flippable);
                   }}
                 >
-                  <ClueCard clue={clue} size={size} used={(used[index] ?? false) && !hinted} />
+                  <ClueCard
+                    clue={clue}
+                    size={size}
+                    used={(used[index] ?? false) && !hinted}
+                    flipped={flipped[index] ?? false}
+                  />
                 </div>
               );
             })}

@@ -157,6 +157,29 @@ card by the pointer distance divided by the zoom. Zooming holds one point still
 where that point sits on the canvas and setting the scroll so it lands back
 under the cursor, in a layout effect after the new zoom has been laid out.
 
+A card whose meaning does not depend on direction can be turned round with a
+right-click, which mirrors it without changing what it says: the pair on an
+`adjacent` card may stand either way, so either drawing is true. Putting the
+shared symbol of two clues side by side is what makes it worth doing, because a
+chain of clues is followed with the eye. `flipAxis` says which way each kind
+turns — `same-column` and `different-column` are stacks and turn top to bottom,
+the four symmetric row cards turn left to right, and `left-of`,
+`immediately-left-of` and `at-an-end` do not turn at all. Right-clicking used to
+be a second way to grey a card out, which left-clicking already did.
+
+Cards also start turned at random, seeded from the puzzle's seed. Without it a
+`next-to-either` card always drew its single tile on the left, and every pair
+card put the earlier row first, so a row of one kind read as a single shape.
+Neither regularity said anything about the solution; the one build order that
+would have, the `between` clue's, is already masked in the generator by
+`maskBetweenOrder`.
+
+A turn is a change to the canvas rather than a move, so like a card's position
+it stays off the undo history and is saved beside the positions. The clue itself
+is never rewritten, so the solver, the generator and the hints cannot tell the
+difference — only `describeClue` is told, so the tooltip names a pair in the
+order the card draws it.
+
 The geometry is in `app/src/ui/clueLayout.ts` rather than in the component:
 which cards a band caught, the rectangle a drag spans, how far to zoom to fit.
 That part is worth testing on its own, and none of it needs a browser.

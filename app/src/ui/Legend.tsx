@@ -32,6 +32,12 @@ export function Legend() {
           selection.
         </p>
         <p>
+          Right-click a card to turn it round. Only cards that say nothing about direction can be
+          turned — the pair on an adjacent card may stand either way, so mirroring one changes
+          nothing it says, and putting the shared symbol of two clues side by side makes a chain of
+          them easier to read.
+        </p>
+        <p>
           Scroll to move around the canvas, ⌘/Ctrl-scroll or the buttons in the corner to zoom, and
           Fit to bring every clue into view.
         </p>
@@ -39,7 +45,7 @@ export function Legend() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {EXAMPLES.map((clue) => (
           <div key={clue.kind} className="flex items-center gap-3">
-            <ClueCard clue={clue} size={DEFAULT_SIZE} used={false} />
+            <ClueCard clue={clue} size={DEFAULT_SIZE} used={false} flipped={false} />
             <span className="text-slate-600">{describeClue(clue)}</span>
           </div>
         ))}

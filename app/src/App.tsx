@@ -15,7 +15,7 @@ import { Board, type InteractionMode } from "./ui/Board";
 import { ClueCanvas } from "./ui/ClueCanvas";
 import { Confetti } from "./ui/Confetti";
 import { Legend } from "./ui/Legend";
-import { layoutCluesByKind, type Point } from "./ui/clueLayout";
+import { flipsForPuzzle, layoutCluesByKind, type Point } from "./ui/clueLayout";
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 const STORAGE_KEY = "sherlock:game:v4";
@@ -47,6 +47,12 @@ type Game = {
    */
   history: Snapshot[];
   positions: Point[];
+  /**
+   * Which cards are drawn mirrored. Like `positions`, and for the same reason,
+   * this is not part of a snapshot: turning a card round is tidying the canvas
+   * rather than a move, so undo leaves it alone.
+   */
+  flipped: boolean[];
 };
 
 type Saved = {
@@ -56,6 +62,7 @@ type Saved = {
   /** Every snapshot of the history, oldest first, so undo and rewind survive a reload. */
   history: Array<{ cells: number[][]; placed: boolean[][]; used: boolean[] }>;
   positions: Point[];
+  flipped?: boolean[];
 };
 
 const startSnapshot = (puzzle: Puzzle): Snapshot => ({
@@ -65,7 +72,13 @@ const startSnapshot = (puzzle: Puzzle): Snapshot => ({
 
 function startGame(difficulty: Difficulty): Game {
   const puzzle = generatePuzzle({ difficulty });
-  return { difficulty, puzzle, history: [startSnapshot(puzzle)], positions: [] };
+  return {
+    difficulty,
+    puzzle,
+    history: [startSnapshot(puzzle)],
+    positions: [],
+    flipped: flipsForPuzzle(puzzle.clues, puzzle.seed),
+  };
 }
 
 /** A puzzle is fully determined by its seed and difficulty, so only those are stored. */
@@ -88,6 +101,12 @@ function loadGame(): Game | null {
         used,
       })),
       positions: saved.positions,
+      // Saves written before cards could be turned round have no orientations,
+      // so the puzzle's own are used and the game carries on.
+      flipped:
+        saved.flipped?.length === puzzle.clues.length
+          ? saved.flipped
+          : flipsForPuzzle(puzzle.clues, puzzle.seed),
     };
   } catch {
     return null;
@@ -188,6 +207,7 @@ export default function App() {
       size: game.puzzle.size,
       history: game.history.map(({ board: { cells, placed }, used }) => ({ cells, placed, used })),
       positions: game.positions,
+      flipped: game.flipped,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
@@ -274,6 +294,18 @@ export default function App() {
       const positions = current.positions.slice();
       for (const { index, point } of moves) positions[index] = point;
       return { ...current, positions };
+    });
+  }, []);
+
+  /**
+   * Turns cards round, which is a change to the canvas rather than to the game,
+   * so it stays off the history the way moving a card does.
+   */
+  const flipClues = useCallback((indices: number[]) => {
+    setGame((current) => {
+      const flipped = current.flipped.slice();
+      for (const index of indices) flipped[index] = !flipped[index];
+      return { ...current, flipped };
     });
   }, []);
 
@@ -391,8 +423,10 @@ export default function App() {
             size={game.puzzle.size}
             positions={game.positions}
             used={used}
+            flipped={game.flipped}
             onMove={moveClue}
             onToggleUsed={toggleUsed}
+            onFlip={flipClues}
             highlight={hint?.kind === "clue" ? hint.clueIndex : null}
           />
         </section>

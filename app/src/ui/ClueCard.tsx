@@ -15,14 +15,28 @@ const Cell = ({ of, tinted }: { of: TileRef; tinted?: boolean }) => (
   </div>
 );
 
-const Row = ({ children }: { children: React.ReactNode }) => (
-  <div className="flex items-stretch divide-x divide-slate-300 overflow-hidden rounded border border-slate-300">
+/**
+ * `reversed` mirrors the strip. The children keep their order in the DOM, so
+ * the dividers have to be flipped with it — `divide-x` draws its line on the
+ * left of each child but the first, which is the wrong edge once the visual
+ * order is reversed.
+ */
+const Row = ({ reversed, children }: { reversed?: boolean; children: React.ReactNode }) => (
+  <div
+    className={`flex items-stretch divide-x divide-slate-300 overflow-hidden rounded border border-slate-300 ${
+      reversed ? "flex-row-reverse divide-x-reverse" : ""
+    }`}
+  >
     {children}
   </div>
 );
 
-const Column = ({ children }: { children: React.ReactNode }) => (
-  <div className="flex flex-col divide-y divide-slate-300 overflow-hidden rounded border border-slate-300">
+const Column = ({ reversed, children }: { reversed?: boolean; children: React.ReactNode }) => (
+  <div
+    className={`flex flex-col divide-y divide-slate-300 overflow-hidden rounded border border-slate-300 ${
+      reversed ? "flex-col-reverse divide-y-reverse" : ""
+    }`}
+  >
     {children}
   </div>
 );
@@ -81,11 +95,19 @@ export function ClueCard({
   clue,
   used,
   size,
+  flipped,
 }: {
   clue: Clue;
   used: boolean;
   /** Columns on the board, for the clue that draws a miniature of a row. */
   size: number;
+  /**
+   * Draw the card mirrored. Only the cards `flipAxis` calls flippable honour
+   * this; the tiles they hold stand in an order the clue does not fix, so
+   * reversing them says the same thing. A mirrored card takes up the same space
+   * as an upright one, so nothing in the layout has to know about it.
+   */
+  flipped: boolean;
 }) {
   const { width, height } = cardSize(clue);
 
@@ -93,14 +115,14 @@ export function ClueCard({
     switch (clue.kind) {
       case "same-column":
         return (
-          <Column>
+          <Column reversed={flipped}>
             <Cell of={clue.a} />
             <Cell of={clue.b} />
           </Column>
         );
       case "different-column":
         return (
-          <div className="flex flex-col items-center">
+          <div className={`flex flex-col items-center ${flipped ? "flex-col-reverse" : ""}`}>
             <Cell of={clue.a} />
             <NotSame />
             <Cell of={clue.b} />
@@ -109,7 +131,7 @@ export function ClueCard({
       case "adjacent":
         return (
           <div className="flex flex-col items-center gap-0.5">
-            <Row>
+            <Row reversed={flipped}>
               <Cell of={clue.a} />
               <Cell of={clue.b} />
             </Row>
@@ -127,7 +149,7 @@ export function ClueCard({
       case "between":
         return (
           <div className="flex flex-col items-center gap-0.5">
-            <Row>
+            <Row reversed={flipped}>
               <Cell of={clue.a} />
               <Cell of={clue.middle} tinted />
               <Cell of={clue.b} />
@@ -152,7 +174,7 @@ export function ClueCard({
         // other.
         return (
           <div className="flex flex-col items-center gap-0.5">
-            <Row>
+            <Row reversed={flipped}>
               <Cell of={clue.a} />
               {Array.from({ length: clue.distance - 1 }, (_, column) => (
                 <div key={column} className="w-3 self-stretch bg-slate-100" />
@@ -172,7 +194,7 @@ export function ClueCard({
       case "next-to-either":
         return (
           <div className="flex flex-col items-center gap-0.5">
-            <div className="flex items-center gap-1">
+            <div className={`flex items-center gap-1 ${flipped ? "flex-row-reverse" : ""}`}>
               <Cell of={clue.a} />
               <div className="flex items-center gap-1 rounded border border-dashed border-slate-400 px-1">
                 <Cell of={clue.b} />
@@ -192,8 +214,8 @@ export function ClueCard({
         used ? "border-slate-200 opacity-35 grayscale" : "border-slate-300"
       }`}
       style={{ width, height }}
-      title={describeClue(clue)}
-      aria-label={describeClue(clue)}
+      title={describeClue(clue, flipped)}
+      aria-label={describeClue(clue, flipped)}
     >
       {body()}
     </div>

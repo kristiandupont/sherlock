@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { CLUE_KINDS, type Clue } from "../model/types";
+import { makeRng } from "../model/rng";
 import {
+  canFlip,
   cardSize,
   cluesWithin,
   contentBounds,
+  describeClue,
   fitZoom,
+  flipAxis,
+  flipsForPuzzle,
   layoutCluesByKind,
+  randomFlips,
   rectFromCorners,
   type Point,
 } from "./clueLayout";
@@ -143,5 +149,88 @@ describe("fitZoom", () => {
 
   it("stays inside the zoom range", () => {
     expect(fitZoom({ width: 100000, height: 10 }, { width: 500, height: 500 }, 0.35, 2.5)).toBe(0.35);
+  });
+});
+
+const everyKind: Clue[] = [
+  { kind: "same-column", a, b },
+  { kind: "different-column", a, b },
+  { kind: "adjacent", a, b },
+  { kind: "left-of", left: a, right: b },
+  { kind: "between", middle: b, a, b: c },
+  { kind: "immediately-left-of", left: a, right: b },
+  { kind: "apart", a, b, distance: 2 },
+  { kind: "at-an-end", a },
+  { kind: "next-to-either", a, b, c },
+];
+
+describe("flipAxis", () => {
+  it("answers for every kind there is", () => {
+    expect(everyKind.map((clue) => clue.kind).sort()).toEqual([...CLUE_KINDS].sort());
+    for (const clue of everyKind)
+      expect(flipAxis(clue), `${clue.kind} has no answer`).not.toBeUndefined();
+  });
+
+  it("refuses the kinds whose meaning is a direction", () => {
+    // Mirroring one of these would make the card say the opposite, and a
+    // one-tile card has nothing to mirror.
+    const fixed = everyKind.filter((clue) => !canFlip(clue)).map((clue) => clue.kind);
+    expect(fixed.sort()).toEqual(["at-an-end", "immediately-left-of", "left-of"]);
+  });
+
+  it("mirrors the stacked cards top to bottom and the rest left to right", () => {
+    const vertical = everyKind.filter((clue) => flipAxis(clue) === "vertical").map((c) => c.kind);
+    expect(vertical.sort()).toEqual(["different-column", "same-column"]);
+    const horizontal = everyKind
+      .filter((clue) => flipAxis(clue) === "horizontal")
+      .map((c) => c.kind);
+    expect(horizontal.sort()).toEqual(["adjacent", "apart", "between", "next-to-either"]);
+  });
+});
+
+describe("randomFlips", () => {
+  it("never turns a card that cannot be turned", () => {
+    for (let seed = 0; seed < 50; seed++) {
+      const flips = randomFlips(everyKind, makeRng(seed));
+      for (const [index, flipped] of flips.entries())
+        if (!canFlip(everyKind[index])) expect(flipped, everyKind[index].kind).toBe(false);
+    }
+  });
+
+  it("draws every flippable kind both ways round across seeds", () => {
+    // Otherwise a kind keeps the one shape it is built with — the lone tile of
+    // a next-to-either card always on the left, the earlier row always first on
+    // a pair card — and a row of them is harder to tell apart.
+    for (const [index, clue] of everyKind.entries()) {
+      if (!canFlip(clue)) continue;
+      const seen = new Set(
+        Array.from({ length: 40 }, (_, seed) => randomFlips(everyKind, makeRng(seed))[index]),
+      );
+      expect(seen, clue.kind).toEqual(new Set([true, false]));
+    }
+  });
+
+  it("gives a puzzle the same orientations every time it is opened", () => {
+    expect(flipsForPuzzle(everyKind, 1234)).toEqual(flipsForPuzzle(everyKind, 1234));
+  });
+});
+
+describe("describeClue", () => {
+  it("names a mirrored pair in the order the card draws it", () => {
+    const clue: Clue = { kind: "between", middle: b, a, b: c };
+    const upright = describeClue(clue);
+    const mirrored = describeClue(clue, true);
+    expect(mirrored).not.toBe(upright);
+    // The middle tile keeps its place; only the pair around it turns.
+    const [middleName] = upright.split(" is directly between ");
+    expect(mirrored.startsWith(`${middleName} is directly between `)).toBe(true);
+    const names = (text: string) =>
+      text.split(" is directly between ")[1].replace(", in either order", "").split(" and ");
+    expect(names(mirrored)).toEqual(names(upright).reverse());
+  });
+
+  it("leaves a card that cannot be mirrored alone", () => {
+    for (const clue of everyKind.filter((each) => !canFlip(each)))
+      expect(describeClue(clue, true)).toBe(describeClue(clue));
   });
 });
