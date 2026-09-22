@@ -22,17 +22,19 @@ const STORAGE_KEY = "sherlock:game:v4";
 
 /**
  * A wrong move is not reported straight away — that would amount to a hint on
- * every move. The notice instead begins fading in the moment the grid goes
- * wrong, and takes `NOTICE_FADE_SECONDS` to arrive. It stays imperceptible for
- * the first several of those, so the player learns that something is wrong
- * without learning which move did it.
+ * every move. The notice stays completely hidden for `NOTICE_DELAY_MS` after
+ * the grid goes wrong, then fades in over `NOTICE_FADE_SECONDS`. An earlier
+ * version started the fade at once and relied on it being too faint to notice
+ * at first, but any opacity above zero is visible against the page, so the
+ * player could tell the moment they had gone wrong.
  *
  * The wait is measured in time rather than in moves, because a player who has
  * gone wrong is often the one who then sits and stares: waiting for moves that
  * never come would leave exactly the wrong person unattended.
  */
 const REWIND_HINT = "Return to the last position that had no mistakes";
-const NOTICE_FADE_SECONDS = 25;
+const NOTICE_DELAY_MS = 20_000;
+const NOTICE_FADE_SECONDS = 5;
 
 /** How long a hint's ring stays before it fades out; matches the CSS animation. */
 const HINT_VISIBLE_MS = 4500;
@@ -145,6 +147,7 @@ export default function App() {
   const warnWrongTurn = brokenIndex >= 0;
 
   const revealNotice = useCallback(() => setNoticeRevealed(true), []);
+  const noticeShown = warnWrongTurn && (noticeRevealed || noticeVisible);
 
   useEffect(() => {
     if (solved && !solvedBefore.current) setCelebrating(true);
@@ -164,14 +167,16 @@ export default function App() {
     if (brokenIndex < 0) setNoticeRevealed(false);
   }, [brokenIndex]);
 
-  // Held at zero opacity for a frame, then transitioned up.
+  // Starts the fade once the grid has been wrong for `NOTICE_DELAY_MS`. Only a
+  // grid put right cancels the timer; further moves on a broken grid neither
+  // restart the wait nor shorten it.
   useEffect(() => {
     if (!warnWrongTurn) {
       setNoticeVisible(false);
       return;
     }
-    const frame = requestAnimationFrame(() => setNoticeVisible(true));
-    return () => cancelAnimationFrame(frame);
+    const timer = window.setTimeout(() => setNoticeVisible(true), NOTICE_DELAY_MS);
+    return () => window.clearTimeout(timer);
   }, [warnWrongTurn]);
 
   useEffect(() => {
@@ -398,16 +403,16 @@ export default function App() {
           <div
             className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
             style={{
-              opacity: noticeRevealed || noticeVisible ? 1 : 0,
-              visibility: warnWrongTurn ? "visible" : "hidden",
-              // No transition while it is hidden, so a grid put right and then
+              opacity: noticeShown ? 1 : 0,
+              // Hidden rather than only transparent during the wait, so its
+              // Go back button cannot be clicked before it can be seen.
+              visibility: noticeShown ? "visible" : "hidden",
+              // No transition on the way out, so a grid put right and then
               // broken again starts its fade from zero rather than part-way up.
               transition:
-                noticeRevealed || !warnWrongTurn
-                  ? "none"
-                  : `opacity ${NOTICE_FADE_SECONDS}s linear`,
+                noticeRevealed || !noticeShown ? "none" : `opacity ${NOTICE_FADE_SECONDS}s linear`,
             }}
-            aria-hidden={!warnWrongTurn}
+            aria-hidden={!noticeShown}
           >
             <span>Something in this grid has gone wrong.</span>
             <Button onClick={rewind} title={REWIND_HINT}>

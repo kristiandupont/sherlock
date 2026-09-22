@@ -6,16 +6,22 @@ type Props = {
   onDone: () => void;
 };
 
-const DURATION_MS = 7200;
+const DURATION_MS = 5600;
 const FADE_FROM = 0.78;
 const PER_CANNON = 70;
 /**
  * A piece thrown from the bottom of the window is back past it about two and a
  * half seconds later, so a single burst cannot fill the run. The cannons fire
- * again at these times instead, spaced so the next volley goes up while the one
- * before it is still coming down.
+ * again at these times, close enough together that the volleys read as one
+ * sustained burst rather than separate shots with a pause between them.
  */
-const VOLLEYS_MS = [0, 1800, 3600];
+const VOLLEYS_MS = [0, 600, 1200];
+/**
+ * How far above the bottom edge the cannons sit. Firing from below the window
+ * made every piece appear already moving fast, as if thrown from somewhere out
+ * of sight; inside the window the player sees it leave the cannon.
+ */
+const CANNON_RISE = 36;
 const GRAVITY = 0.32;
 const DRAG = 0.994;
 
@@ -50,7 +56,7 @@ function makePieces(width: number, height: number, firedAt: number): Piece[] {
       const speed = 13 + Math.random() * 15;
       pieces.push({
         x: cannon.x,
-        y: height + 10,
+        y: height - CANNON_RISE,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         angle: Math.random() * Math.PI * 2,

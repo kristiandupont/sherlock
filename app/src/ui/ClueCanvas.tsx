@@ -20,8 +20,9 @@ type Props = {
   flipped: boolean[];
   /** Called once a drag finishes, with every card that drag carried. */
   onMove: (moves: Array<{ index: number; point: Point }>) => void;
+  /** Greys a card out or brings it back, which right-clicking it asks for. */
   onToggleUsed: (index: number) => void;
-  /** Mirrors every card in the list, which right-clicking a card asks for. */
+  /** Mirrors every card in the list, which clicking a card asks for. */
   onFlip: (indices: number[]) => void;
   /** Index of the clue the hint points at, ringed and scrolled into view. */
   highlight: number | null;
@@ -234,7 +235,13 @@ export function ClueCanvas({
         return next;
       });
     } else {
-      onToggleUsed(cardDrag.index);
+      // A plain click mirrors the card, on the same rule as dragging: one that
+      // is part of the selection carries the rest of it, any other card goes on
+      // its own. Cards whose meaning is a direction cannot be mirrored and are
+      // dropped from the list rather than left saying the opposite.
+      const carried = cardDrag.wasSelected ? [...selection] : [cardDrag.index];
+      const flippable = carried.filter((i) => clues[i] && canFlip(clues[i]));
+      if (flippable.length > 0) onFlip(flippable);
     }
     setCardDrag(null);
   };
@@ -370,15 +377,8 @@ export function ClueCanvas({
                   onPointerUp={endCardDrag}
                   onPointerCancel={endCardDrag}
                   onContextMenu={(event) => {
-                    // Right-click mirrors the card, on the same rule as
-                    // dragging: one that is part of the selection carries the
-                    // rest of it, any other card goes on its own. Cards whose
-                    // meaning is a direction cannot be mirrored and are dropped
-                    // from the list rather than left saying the opposite.
                     event.preventDefault();
-                    const carried = selected ? [...selection] : [index];
-                    const flippable = carried.filter((i) => clues[i] && canFlip(clues[i]));
-                    if (flippable.length > 0) onFlip(flippable);
+                    onToggleUsed(index);
                   }}
                 >
                   <ClueCard

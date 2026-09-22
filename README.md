@@ -8,8 +8,8 @@ the symbols relate across columns, and the grid is worked out from them alone.
 
 Unlike the original, the clues are not pinned to fixed slots. Every clue is a
 card on a freeform canvas: drag it anywhere, put a same-column clue next to the
-adjacency clue it interacts with, and click a card to grey it out once it has
-been used. Cards start grouped by kind and are never rearranged again — where
+adjacency clue it interacts with, and right-click a card to grey it out once it
+has been used. Cards start grouped by kind and are never rearranged again — where
 they end up is the player's business.
 
 The app lives in [`app/`](app):
@@ -142,8 +142,9 @@ carries only itself and drops the selection, so what moves is always what was
 picked up. Shift-click adds or removes one card, shift-drag adds a band to the
 selection, and Escape clears it.
 
-Clicking a card already means "I have used this one", which is worth more than
-click-to-select, so selection is the band and shift-click instead. That leaves
+Clicking a card already turns it round, and right-clicking greys it out; both
+are worth more than click-to-select, so selection is the band and shift-click
+instead. That leaves
 dragging empty canvas doing selection rather than panning, so panning is the
 scroll it always was, with middle-drag as well.
 
@@ -158,14 +159,15 @@ where that point sits on the canvas and setting the scroll so it lands back
 under the cursor, in a layout effect after the new zoom has been laid out.
 
 A card whose meaning does not depend on direction can be turned round with a
-right-click, which mirrors it without changing what it says: the pair on an
+click, which mirrors it without changing what it says: the pair on an
 `adjacent` card may stand either way, so either drawing is true. Putting the
 shared symbol of two clues side by side is what makes it worth doing, because a
 chain of clues is followed with the eye. `flipAxis` says which way each kind
 turns — `same-column` and `different-column` are stacks and turn top to bottom,
 the four symmetric row cards turn left to right, and `left-of`,
-`immediately-left-of` and `at-an-end` do not turn at all. Right-clicking used to
-be a second way to grey a card out, which left-clicking already did.
+`immediately-left-of` and `at-an-end` do not turn at all, so clicking one does
+nothing. Clicking used to grey a card out as well as right-clicking; right-click
+alone does that now.
 
 Cards also start turned at random, seeded from the puzzle's seed. Without it a
 `next-to-either` card always drew its single tile on the left, and every pair
@@ -228,16 +230,18 @@ broken ones, and `app/src/game/history.ts` finds the boundary. Going back is a
 truncation of the history array, which leaves undo working on what remains.
 
 A wrong move is not reported when it happens — that would amount to a hint on
-every move. The notice instead starts fading in the moment the grid goes wrong
-and takes 25 seconds to arrive, staying imperceptible for the first several of
-them. So the player learns that something is wrong without learning which move
+every move. The notice instead stays completely hidden for 20 seconds after the
+grid goes wrong, then fades in over five. An earlier version began the fade at
+once and relied on it being too faint to see at first, but any opacity above
+zero shows against the page, so a player could tell the moment they went wrong.
+So the player learns that something is wrong without learning which move
 did it, and without spending twenty minutes on a grid that cannot be solved.
 
 The wait is measured in time rather than in moves. Waiting for a few further
 moves also hides the moment of the mistake, but a player who has gone wrong is
 often the one who then sits and stares at the grid, and moves that never come
 would leave exactly the wrong person unattended. A later move neither restarts
-the fade nor hurries it.
+the wait nor hurries it.
 
 Two things cut the wait short, and both are cases where there is nothing left to
 protect the player from. Asking for a hint on a broken grid brings the notice up
@@ -259,9 +263,11 @@ detector and would defeat the delay.
 ## Finishing
 
 A correct grid gets confetti, thrown in the six tile colours from two cannons at
-the foot of the screen, over `app/src/ui/Confetti.tsx`. It is a plain canvas and
-a few dozen lines of physics rather than a dependency, it clears itself away
-after three and a half seconds, and it leaves the banner behind so the result is
+the foot of the screen, over `app/src/ui/Confetti.tsx`. The cannons sit just
+inside the bottom edge and fire three volleys 0.6 seconds apart, so the pieces
+are seen leaving the cannon and the volleys run together into one burst. It is a
+plain canvas and a few dozen lines of physics rather than a dependency, it
+clears itself away after five and a half seconds, and it leaves the banner behind so the result is
 still there afterwards. Anyone whose system asks for reduced motion gets the
 banner alone. Reopening a puzzle that was already finished does not celebrate it
 a second time.
