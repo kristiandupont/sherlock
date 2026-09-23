@@ -315,7 +315,9 @@ export function ClueCanvas({
   const bandRect = band ? rectFromCorners(band.origin, band.current) : null;
 
   return (
-    <div className="relative h-full w-full">
+    // Nothing on the canvas is text to be read — the letters are drawn as SVG
+    // text, so without this a drag across the cards selects them.
+    <div className="relative h-full w-full select-none">
       <div
         ref={surfaceRef}
         data-canvas
