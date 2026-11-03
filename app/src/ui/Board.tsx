@@ -2,18 +2,15 @@ import { candidatesAt, isReadyToPlace, placedTile, type BoardState } from "../ga
 import { TileGlyph } from "./TileGlyph";
 import { ROWS, tileName } from "./tileSets";
 
-export type InteractionMode = "place" | "rule-out";
-
 type Props = {
   board: BoardState;
-  mode: InteractionMode;
   /** Cell the current hint points at, ringed until the hint fades. */
   highlight: { row: number; col: number } | null;
   onPlace: (row: number, col: number, tile: number) => void;
   onRuleOut: (row: number, col: number, tile: number) => void;
 };
 
-export function Board({ board, mode, highlight, onPlace, onRuleOut }: Props) {
+export function Board({ board, highlight, onPlace, onRuleOut }: Props) {
   const { size } = board;
   const slotColumns = Math.ceil(Math.sqrt(size));
   const slotRows = Math.ceil(size / slotColumns);
@@ -78,12 +75,8 @@ export function Board({ board, mode, highlight, onPlace, onRuleOut }: Props) {
                           key={tile}
                           type="button"
                           className="flex items-center justify-center rounded-sm transition hover:bg-slate-200"
-                          title={`${tileName(row, tile)} — ${
-                            mode === "place" ? "click to place, right-click to rule out" : "click to rule out"
-                          }`}
-                          onClick={() =>
-                            mode === "place" ? onPlace(row, col, tile) : onRuleOut(row, col, tile)
-                          }
+                          title={`${tileName(row, tile)} — click to place, right-click to rule out`}
+                          onClick={() => onPlace(row, col, tile)}
                           onContextMenu={(event) => {
                             event.preventDefault();
                             onRuleOut(row, col, tile);

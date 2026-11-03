@@ -9,15 +9,15 @@ import {
 } from "./game/board";
 import { findHints, type Hint } from "./game/hint";
 import { firstBrokenIndex, rewindToLastGood, type Snapshot } from "./game/history";
+import { DIFFICULTIES, parsePuzzleHash, puzzleHash, type PuzzleLink } from "./game/link";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
-import { Board, type InteractionMode } from "./ui/Board";
+import { Board } from "./ui/Board";
 import { ClueCanvas } from "./ui/ClueCanvas";
 import { Confetti } from "./ui/Confetti";
-import { Legend } from "./ui/Legend";
+import { HelpDialog } from "./ui/HelpDialog";
 import { flipsForPuzzle, layoutCluesByKind, type Point } from "./ui/clueLayout";
 
-const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 const STORAGE_KEY = "sherlock:game:v4";
 
 /**
@@ -55,6 +55,11 @@ type Game = {
    * rather than a move, so undo leaves it alone.
    */
   flipped: boolean[];
+  /**
+   * Presses of Hint and Go back. Kept off the history, so undoing a move does
+   * not take back the help that came before it.
+   */
+  hintsUsed: number;
 };
 
 type Saved = {
@@ -65,6 +70,7 @@ type Saved = {
   history: Array<{ cells: number[][]; placed: boolean[][]; used: boolean[] }>;
   positions: Point[];
   flipped?: boolean[];
+  hintsUsed?: number;
 };
 
 const startSnapshot = (puzzle: Puzzle): Snapshot => ({
@@ -72,15 +78,50 @@ const startSnapshot = (puzzle: Puzzle): Snapshot => ({
   used: puzzle.clues.map(() => false),
 });
 
-function startGame(difficulty: Difficulty): Game {
-  const puzzle = generatePuzzle({ difficulty });
+/**
+ * Builds the puzzle a seed produced. A seed returned by `generatePuzzle` is the
+ * one its retries settled on, so building from it once, with no clue range to
+ * retry for, gives the same puzzle back. Retrying could move past it, when the
+ * puzzle was only the closest miss.
+ */
+const puzzleFromLink = ({ difficulty, size, seed }: PuzzleLink): Puzzle =>
+  generatePuzzle({ difficulty, size, seed, clueRange: null });
+
+function newGameState(difficulty: Difficulty, puzzle: Puzzle): Game {
   return {
     difficulty,
     puzzle,
     history: [startSnapshot(puzzle)],
     positions: [],
     flipped: flipsForPuzzle(puzzle.clues, puzzle.seed),
+    hintsUsed: 0,
   };
+}
+
+const startGame = (difficulty: Difficulty): Game =>
+  newGameState(difficulty, generatePuzzle({ difficulty }));
+
+const startLinkedGame = (link: PuzzleLink): Game =>
+  newGameState(link.difficulty, puzzleFromLink(link));
+
+const linkOf = (game: Game): PuzzleLink => ({
+  difficulty: game.difficulty,
+  size: game.puzzle.size,
+  seed: game.puzzle.seed,
+});
+
+const sameLink = (a: PuzzleLink, b: PuzzleLink): boolean =>
+  a.difficulty === b.difficulty && a.size === b.size && a.seed === b.seed;
+
+/**
+ * A puzzle named in the address resumes the saved game when it is the same
+ * puzzle, and otherwise starts afresh, replacing the saved one.
+ */
+function initialGame(): Game {
+  const link = parsePuzzleHash(window.location.hash);
+  const saved = loadGame();
+  if (!link) return saved ?? startGame("medium");
+  return saved && sameLink(linkOf(saved), link) ? saved : startLinkedGame(link);
 }
 
 /** A puzzle is fully determined by its seed and difficulty, so only those are stored. */
@@ -90,8 +131,7 @@ function loadGame(): Game | null {
     if (!raw) return null;
     const saved = JSON.parse(raw) as Saved;
     if (!DIFFICULTIES.includes(saved.difficulty)) return null;
-    const puzzle = generatePuzzle({ seed: saved.seed, difficulty: saved.difficulty, size: saved.size });
-    if (puzzle.seed !== saved.seed) return null;
+    const puzzle = puzzleFromLink(saved);
     if (!Array.isArray(saved.history) || saved.history.length === 0) return null;
     if (saved.history.some((state) => !state?.cells || !state?.placed)) return null;
     if (saved.history.some((state) => state.used?.length !== puzzle.clues.length)) return null;
@@ -109,6 +149,7 @@ function loadGame(): Game | null {
         saved.flipped?.length === puzzle.clues.length
           ? saved.flipped
           : flipsForPuzzle(puzzle.clues, puzzle.seed),
+      hintsUsed: typeof saved.hintsUsed === "number" ? saved.hintsUsed : 0,
     };
   } catch {
     return null;
@@ -116,8 +157,7 @@ function loadGame(): Game | null {
 }
 
 export default function App() {
-  const [game, setGame] = useState<Game>(() => loadGame() ?? startGame("medium"));
-  const [mode, setMode] = useState<InteractionMode>("place");
+  const [game, setGame] = useState<Game>(initialGame);
   const [hint, setHint] = useState<Hint | null>(null);
   /** Advances on each Hint press so repeats move through the rest. */
   const [hintCursor, setHintCursor] = useState(0);
@@ -128,7 +168,8 @@ export default function App() {
    * disturb it, because opacity is already headed for the same value.
    */
   const [noticeRevealed, setNoticeRevealed] = useState(false);
-  const [showLegend, setShowLegend] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const closeHelp = useCallback(() => setShowHelp(false), []);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -213,6 +254,7 @@ export default function App() {
       history: game.history.map(({ board: { cells, placed }, used }) => ({ cells, placed, used })),
       positions: game.positions,
       flipped: game.flipped,
+      hintsUsed: game.hintsUsed,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
@@ -220,6 +262,28 @@ export default function App() {
       // A full or blocked store just means the game is not resumable.
     }
   }, [game]);
+
+  // The address always names the puzzle on screen, so it can be copied and
+  // shared at any point. Replacing the entry rather than pushing one keeps Back
+  // from stepping through every puzzle played.
+  const currentHash = puzzleHash(linkOf(game));
+  useEffect(() => {
+    if (window.location.hash !== currentHash) window.history.replaceState(null, "", currentHash);
+  }, [currentHash]);
+
+  // A link pasted into the address bar of an open tab changes only the hash,
+  // which does not reload the page.
+  useEffect(() => {
+    const onHashChange = () => {
+      const link = parsePuzzleHash(window.location.hash);
+      if (!link) return;
+      setGame((current) => (sameLink(linkOf(current), link) ? current : startLinkedGame(link)));
+      setHint(null);
+      setHintCursor(0);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   const pushBoard = useCallback((next: BoardState) => {
     setHint(null);
@@ -249,22 +313,24 @@ export default function App() {
     setHintCursor(0);
   };
 
-  const restart = () => {
-    clearNotices();
-    setGame((current) => ({ ...current, history: [startSnapshot(current.puzzle)] }));
-  };
+  const countHint = () =>
+    setGame((current) => ({ ...current, hintsUsed: current.hintsUsed + 1 }));
 
   const newGame = (difficulty: Difficulty) => {
     clearNotices();
     setGame(startGame(difficulty));
   };
 
-  /** Drops every board built on top of the wrong move. */
+  /**
+   * Drops every board built on top of the wrong move. It tells the player where
+   * they went wrong, so it counts as a hint.
+   */
   const rewind = () => {
     clearNotices();
     setGame((current) => ({
       ...current,
       history: rewindToLastGood(current.history, current.puzzle.solution),
+      hintsUsed: current.hintsUsed + 1,
     }));
   };
 
@@ -280,11 +346,14 @@ export default function App() {
    */
   const showHint = () => {
     if (brokenIndex >= 0) {
+      countHint();
       revealNotice();
       return;
     }
     const hints = findHints(board, game.puzzle.clues, used);
+    // Nothing to show, as on a solved grid, so nothing to count.
     if (hints.length === 0) return;
+    countHint();
     const pick = hints[hintCursor % hints.length];
     setHintCursor((cursor) => cursor + 1);
     // Cleared first so that ringing the same target twice restarts its animation.
@@ -349,40 +418,33 @@ export default function App() {
         <Button onClick={undo} disabled={game.history.length < 2}>
           Undo
         </Button>
-        <Button onClick={restart}>Restart</Button>
-        <Button onClick={showHint}>Hint</Button>
-
-        <label className="ml-1 flex items-center gap-1.5 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={mode === "rule-out"}
-            onChange={(event) => setMode(event.target.checked ? "rule-out" : "place")}
-          />
-          Tap to rule out
-        </label>
+        <Button
+          onClick={showHint}
+          title={`Hints used on this puzzle, Go back included: ${game.hintsUsed}`}
+        >
+          Hint
+          {game.hintsUsed > 0 && (
+            <span data-hints-used className="ml-1.5 tabular-nums text-amber-700">
+              ×{game.hintsUsed}
+            </span>
+          )}
+        </Button>
 
         <div className="ml-auto flex items-center gap-3 text-xs text-slate-500">
           <span>
             {stats.clueCount} clues · seed {game.puzzle.seed}
           </span>
-          <Button onClick={() => setShowLegend((value) => !value)}>
-            {showLegend ? "Hide help" : "Help"}
-          </Button>
+          <Button onClick={() => setShowHelp(true)}>Help</Button>
         </div>
       </header>
 
-      {showLegend && (
-        <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-          <Legend />
-        </div>
-      )}
+      <HelpDialog open={showHelp} onClose={closeHelp} />
 
       <main className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:flex-row">
         <section className="flex w-full shrink-0 flex-col gap-2 lg:w-[520px]">
           <div className="rounded-lg border border-slate-200 bg-white p-3">
             <Board
               board={board}
-              mode={mode}
               highlight={hint?.kind === "cell" ? hint : null}
               onPlace={handlePlace}
               onRuleOut={handleRuleOut}

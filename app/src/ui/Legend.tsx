@@ -22,6 +22,18 @@ export function Legend() {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
       <div className="mb-3 space-y-1.5 text-slate-600">
+        <p className="text-slate-700">
+          Sherlock is a deduction puzzle. The grid has six rows, each holding six symbols of one
+          kind, and every symbol belongs in exactly one of the six columns. The clues on the canvas
+          say how symbols stand in relation to each other — in the same column, next to each other,
+          somewhere to the left — and together they pin down the whole grid. Nothing has to be
+          guessed: every step can be worked out from the clues and what is already settled.
+        </p>
+        <p>
+          Each cell starts with all six candidates. Rule out the ones a clue forbids, and place a
+          symbol once you know it belongs there. Hint points at something you could work out next,
+          and keeps count.
+        </p>
         <p>
           Left-click a small symbol to place it, right-click to rule it out.
         </p>
@@ -50,6 +62,18 @@ export function Legend() {
           </div>
         ))}
       </div>
+      <p className="mt-3 border-t border-slate-200 pt-2 text-xs text-slate-500">
+        Based on{" "}
+        <a
+          className="text-indigo-700 underline hover:text-indigo-900"
+          href="https://www.kaser.com/sherwin.html"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Sherlock by Everett Kaser
+        </a>
+        , the original game this one follows.
+      </p>
     </div>
   );
 }
