@@ -1,29 +1,52 @@
 import { useEffect, useRef } from "react";
+import { volleysFor, type Cannon } from "./celebration";
 import { ROWS } from "./tileSets";
 
 type Props = {
+  /** Hints used on the puzzle, Go back included; fewer hints, more confetti. */
+  hintsUsed: number;
   /** Called once the last piece has fallen, so the canvas can be unmounted. */
   onDone: () => void;
 };
 
 const DURATION_MS = 5600;
 const FADE_FROM = 0.78;
-const PER_CANNON = 70;
-/**
- * A piece thrown from the bottom of the window is back past it about two and a
- * half seconds later, so a single burst cannot fill the run. The cannons fire
- * again at these times, close enough together that the volleys read as one
- * sustained burst rather than separate shots with a pause between them.
- */
-const VOLLEYS_MS = [0, 600, 1200];
 /**
  * How far above the bottom edge the cannons sit. Firing from below the window
  * made every piece appear already moving fast, as if thrown from somewhere out
  * of sight; inside the window the player sees it leave the cannon.
  */
 const CANNON_RISE = 36;
+/**
+ * The physics advance in fixed steps of a 60 Hz frame, however often the
+ * browser actually draws. Stepping once per drawn frame ran the whole
+ * celebration at double speed on a 120 Hz display.
+ */
+const STEP_MS = 1000 / 60;
+/** Gravity and launch speeds per step, before scaling to the window's height. */
 const GRAVITY = 0.32;
 const DRAG = 0.994;
+const MIN_SPEED = 13;
+const MAX_SPEED = 28;
+/**
+ * The highest a piece may climb, as a share of the distance from the cannons
+ * to the top edge. Launch speeds are scaled to the window so that the fastest
+ * piece fired straight up stops at this height.
+ */
+const PEAK_SHARE = 0.92;
+
+/** How high a piece fired straight up at this speed climbs, in unscaled pixels. */
+function peakHeight(speed: number): number {
+  let vy = -speed;
+  let y = 0;
+  while (vy < 0) {
+    vy = (vy + GRAVITY) * DRAG;
+    y += vy;
+  }
+  return -y;
+}
+
+const UNSCALED_PEAK = peakHeight(MAX_SPEED);
 
 type Piece = {
   x: number;
@@ -43,36 +66,52 @@ type Piece = {
 /** The tile colours, so the celebration belongs to this game rather than any game. */
 const COLOURS = ROWS.map((row) => row.color);
 
-function makePieces(width: number, height: number, firedAt: number): Piece[] {
-  const pieces: Piece[] = [];
-  const cannons = [
-    { x: width * 0.12, aim: -Math.PI / 3 },
-    { x: width * 0.88, aim: (-Math.PI * 2) / 3 },
-  ];
+const CANNONS: Record<Cannon, { share: number; aim: number; spread: number }> = {
+  left: { share: 0.12, aim: -Math.PI / 3, spread: 0.7 },
+  centre: { share: 0.5, aim: -Math.PI / 2, spread: 0.5 },
+  right: { share: 0.88, aim: (-Math.PI * 2) / 3, spread: 0.7 },
+};
 
-  for (const cannon of cannons)
-    for (let i = 0; i < PER_CANNON; i++) {
-      const angle = cannon.aim + (Math.random() - 0.5) * 0.7;
-      const speed = 13 + Math.random() * 15;
-      pieces.push({
-        x: cannon.x,
-        y: height - CANNON_RISE,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        angle: Math.random() * Math.PI * 2,
-        spin: (Math.random() - 0.5) * 0.3,
-        width: 6 + Math.random() * 6,
-        height: 8 + Math.random() * 8,
-        colour: COLOURS[Math.floor(Math.random() * COLOURS.length)],
-        round: Math.random() < 0.25,
-        firedAt,
-      });
-    }
+/**
+ * Throws one volley. Speeds are multiplied by `scale`, and the caller
+ * multiplies gravity by the same factor, which makes the whole trajectory
+ * `scale` times as large while taking the same time to fly.
+ */
+function makePieces(
+  cannon: Cannon,
+  count: number,
+  firedAt: number,
+  width: number,
+  height: number,
+  scale: number,
+): Piece[] {
+  const { share, aim, spread } = CANNONS[cannon];
+  const pieces: Piece[] = [];
+  for (let i = 0; i < count; i++) {
+    const angle = aim + (Math.random() - 0.5) * spread;
+    const speed = (MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED)) * scale;
+    pieces.push({
+      x: width * share,
+      y: height - CANNON_RISE,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      angle: Math.random() * Math.PI * 2,
+      spin: (Math.random() - 0.5) * 0.3,
+      width: 6 + Math.random() * 6,
+      height: 8 + Math.random() * 8,
+      colour: COLOURS[Math.floor(Math.random() * COLOURS.length)],
+      round: Math.random() < 0.25,
+      firedAt,
+    });
+  }
   return pieces;
 }
 
-export function Confetti({ onDone }: Props) {
+export function Confetti({ hintsUsed, onDone }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Read once at mount, so a hint counted during the celebration does not
+  // restart it.
+  const hintsAtStart = useRef(hintsUsed);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -83,40 +122,70 @@ export function Confetti({ onDone }: Props) {
       return;
     }
 
-    const ratio = window.devicePixelRatio || 1;
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
-    context.scale(ratio, ratio);
+    // The simulation runs in the window's coordinates at the moment of solving.
+    // If the window changes size or moves to a screen with another pixel ratio
+    // during the run, the canvas is resized and positions are mapped onto the
+    // new size when drawn.
+    const simWidth = window.innerWidth;
+    const simHeight = window.innerHeight;
+    const scale = (PEAK_SHARE * (simHeight - CANNON_RISE)) / UNSCALED_PEAK;
+    const gravity = GRAVITY * scale;
 
-    const pieces = VOLLEYS_MS.flatMap((firedAt) => makePieces(width, height, firedAt));
+    let drawWidth = 0;
+    let drawHeight = 0;
+    let drawRatio = 0;
+    const fitCanvas = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const ratio = window.devicePixelRatio || 1;
+      if (width === drawWidth && height === drawHeight && ratio === drawRatio) return;
+      drawWidth = width;
+      drawHeight = height;
+      drawRatio = ratio;
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    };
+
+    const pieces = volleysFor(hintsAtStart.current).flatMap((volley) =>
+      makePieces(volley.cannon, volley.pieces, volley.at, simWidth, simHeight, scale),
+    );
     const start = performance.now();
+    let steps = 0;
     let frame = 0;
 
     const draw = (now: number) => {
       const elapsed = now - start;
+      fitCanvas();
+      context.clearRect(0, 0, drawWidth, drawHeight);
       if (elapsed >= DURATION_MS) {
-        context.clearRect(0, 0, width, height);
         onDone();
         return;
       }
+
+      for (; steps * STEP_MS < elapsed; steps++) {
+        const time = steps * STEP_MS;
+        for (const piece of pieces) {
+          if (time < piece.firedAt) continue;
+          piece.vy += gravity;
+          piece.vx *= DRAG;
+          piece.vy *= DRAG;
+          piece.x += piece.vx;
+          piece.y += piece.vy;
+          piece.angle += piece.spin;
+        }
+      }
+
       const progress = elapsed / DURATION_MS;
-      context.clearRect(0, 0, width, height);
       context.globalAlpha =
         progress < FADE_FROM ? 1 : 1 - (progress - FADE_FROM) / (1 - FADE_FROM);
+      const toX = drawWidth / simWidth;
+      const toY = drawHeight / simHeight;
 
       for (const piece of pieces) {
         if (elapsed < piece.firedAt) continue;
-        piece.vy += GRAVITY;
-        piece.vx *= DRAG;
-        piece.vy *= DRAG;
-        piece.x += piece.vx;
-        piece.y += piece.vy;
-        piece.angle += piece.spin;
-
         context.save();
-        context.translate(piece.x, piece.y);
+        context.translate(piece.x * toX, piece.y * toY);
         context.rotate(piece.angle);
         context.fillStyle = piece.colour;
         if (piece.round) {

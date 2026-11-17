@@ -455,7 +455,7 @@ export default function App() {
               Solved. Every column is settled.
             </p>
           )}
-          {celebrating && <Confetti onDone={stopCelebrating} />}
+          {celebrating && <Confetti hintsUsed={game.hintsUsed} onDone={stopCelebrating} />}
 
           {/*
             The notice is always in the document and only its opacity changes.

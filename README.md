@@ -262,15 +262,26 @@ detector and would defeat the delay.
 
 ## Finishing
 
-A correct grid gets confetti, thrown in the six tile colours from two cannons at
-the foot of the screen, over `app/src/ui/Confetti.tsx`. The cannons sit just
-inside the bottom edge and fire three volleys 0.6 seconds apart, so the pieces
-are seen leaving the cannon and the volleys run together into one burst. It is a
-plain canvas and a few dozen lines of physics rather than a dependency, it
-clears itself away after five and a half seconds, and it leaves the banner behind so the result is
-still there afterwards. Anyone whose system asks for reduced motion gets the
-banner alone. Reopening a puzzle that was already finished does not celebrate it
-a second time.
+A correct grid gets confetti, thrown in the six tile colours from cannons at the
+foot of the screen, over `app/src/ui/Confetti.tsx`. How much depends on the hints
+used, Go back included (`app/src/ui/celebration.ts`): a solve without hints fires
+four volleys from both corners and two from the centre, one hint fires the three
+corner volleys 0.6 seconds apart, and each further hint fires fewer, down to one
+small volley from the centre of the bottom edge, which every solve still gets.
+The cannons sit just inside the bottom edge, so the pieces are seen leaving the
+cannon, and the volleys run together into one burst.
+
+Launch speeds and gravity are scaled to the window's height, so the fastest piece
+stops just short of the top edge on any screen. The physics advance in fixed
+60 Hz steps, so a 120 Hz display does not play the celebration at double speed.
+If the window is resized or moved to a screen with another pixel ratio during the
+run, the canvas is resized and the pieces are mapped onto the new size.
+
+It is a plain canvas and a few dozen lines of physics rather than a dependency,
+it clears itself away after five and a half seconds, and it leaves the banner
+behind so the result is still there afterwards. Anyone whose system asks for
+reduced motion gets the banner alone. Reopening a puzzle that was already
+finished does not celebrate it a second time.
 
 ## Layout
 
