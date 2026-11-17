@@ -11,6 +11,17 @@ import { findHints, type Hint } from "./game/hint";
 import { firstBrokenIndex, rewindToLastGood, type Snapshot } from "./game/history";
 import { LEGACY_STORAGE_KEY } from "./game/legacySave";
 import { cluesMentioning } from "./game/peek";
+import {
+  accuse,
+  addSuspects,
+  clearSuspect,
+  isWrongAccusation,
+  noSuspects,
+  restoreSuspects,
+  verdict,
+  withdrawWrongAccusation,
+  type Suspects,
+} from "./game/suspects";
 import { DIFFICULTIES, parsePuzzleHash, puzzleHash, type PuzzleLink } from "./game/link";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
@@ -63,10 +74,14 @@ type Game = {
    * not take back the help that came before it.
    */
   hintsUsed: number;
+  /** The suspects strip of a false-card puzzle. Off the history, like `positions`. */
+  suspects: Suspects;
 };
 
 type Saved = {
   difficulty: Difficulty;
+  /** Absent in saves written before false-card puzzles existed. */
+  falseCard?: boolean;
   seed: number;
   size: number;
   /** Every snapshot of the history, oldest first, so undo and rewind survive a reload. */
@@ -74,6 +89,7 @@ type Saved = {
   positions: Point[];
   flipped?: boolean[];
   hintsUsed?: number;
+  suspects?: Suspects;
 };
 
 const startSnapshot = (puzzle: Puzzle): Snapshot => ({
@@ -87,8 +103,8 @@ const startSnapshot = (puzzle: Puzzle): Snapshot => ({
  * retry for, gives the same puzzle back. Retrying could move past it, when the
  * puzzle was only the closest miss.
  */
-const puzzleFromLink = ({ difficulty, size, seed }: PuzzleLink): Puzzle =>
-  generatePuzzle({ difficulty, size, seed, clueRange: null });
+const puzzleFromLink = ({ difficulty, falseCard, size, seed }: PuzzleLink): Puzzle =>
+  generatePuzzle({ difficulty, falseCard, size, seed, clueRange: null });
 
 function newGameState(difficulty: Difficulty, puzzle: Puzzle): Game {
   return {
@@ -98,23 +114,28 @@ function newGameState(difficulty: Difficulty, puzzle: Puzzle): Game {
     positions: [],
     flipped: flipsForPuzzle(puzzle.clues, puzzle.seed),
     hintsUsed: 0,
+    suspects: noSuspects,
   };
 }
 
-const startGame = (difficulty: Difficulty): Game =>
-  newGameState(difficulty, generatePuzzle({ difficulty }));
+const startGame = (difficulty: Difficulty, falseCard: boolean): Game =>
+  newGameState(difficulty, generatePuzzle({ difficulty, falseCard }));
 
 const startLinkedGame = (link: PuzzleLink): Game =>
   newGameState(link.difficulty, puzzleFromLink(link));
 
 const linkOf = (game: Game): PuzzleLink => ({
   difficulty: game.difficulty,
+  falseCard: game.puzzle.falseClue !== null,
   size: game.puzzle.size,
   seed: game.puzzle.seed,
 });
 
 const sameLink = (a: PuzzleLink, b: PuzzleLink): boolean =>
-  a.difficulty === b.difficulty && a.size === b.size && a.seed === b.seed;
+  a.difficulty === b.difficulty &&
+  a.falseCard === b.falseCard &&
+  a.size === b.size &&
+  a.seed === b.seed;
 
 /**
  * A puzzle named in the address resumes the saved game when it is the same
@@ -123,7 +144,7 @@ const sameLink = (a: PuzzleLink, b: PuzzleLink): boolean =>
 function initialGame(): Game {
   const link = parsePuzzleHash(window.location.hash);
   const saved = loadGame();
-  if (!link) return saved ?? startGame("medium");
+  if (!link) return saved ?? startGame("medium", false);
   return saved && sameLink(linkOf(saved), link) ? saved : startLinkedGame(link);
 }
 
@@ -137,7 +158,7 @@ function loadGame(): Game | null {
     const saved = JSON.parse(raw) as Saved;
     if (!DIFFICULTIES.includes(saved.difficulty)) return null;
     if (legacy && saved.difficulty !== "hard") return null;
-    const puzzle = puzzleFromLink(saved);
+    const puzzle = puzzleFromLink({ ...saved, falseCard: saved.falseCard ?? false });
     if (!Array.isArray(saved.history) || saved.history.length === 0) return null;
     if (saved.history.some((state) => !state?.cells || !state?.placed)) return null;
     if (saved.history.some((state) => state.used?.length !== puzzle.clues.length)) return null;
@@ -156,6 +177,7 @@ function loadGame(): Game | null {
           ? saved.flipped
           : flipsForPuzzle(puzzle.clues, puzzle.seed),
       hintsUsed: typeof saved.hintsUsed === "number" ? saved.hintsUsed : 0,
+      suspects: restoreSuspects(saved.suspects, puzzle.clues.length),
     };
   } catch {
     return null;
@@ -196,7 +218,10 @@ export default function App() {
     () => firstBrokenIndex(game.history, game.puzzle.solution),
     [game.history, game.puzzle],
   );
-  const warnWrongTurn = brokenIndex >= 0;
+  const wrongAccusation = isWrongAccusation(game.suspects, game.puzzle.falseClue);
+  // Accusing a true card is a mistake in the same way as ruling out a symbol
+  // that belongs, so it brings up the same notice, after the same wait.
+  const warnWrongTurn = brokenIndex >= 0 || wrongAccusation;
 
   const revealNotice = useCallback(() => setNoticeRevealed(true), []);
   const noticeShown = warnWrongTurn && (noticeRevealed || noticeVisible);
@@ -214,10 +239,10 @@ export default function App() {
     revealNotice();
   }, [complete, brokenIndex, revealNotice]);
 
-  // A grid put right again forgets that it was ever revealed.
+  // Once nothing is wrong any more, the notice forgets it was ever revealed.
   useEffect(() => {
-    if (brokenIndex < 0) setNoticeRevealed(false);
-  }, [brokenIndex]);
+    if (!warnWrongTurn) setNoticeRevealed(false);
+  }, [warnWrongTurn]);
 
   // Starts the fade once the grid has been wrong for `NOTICE_DELAY_MS`. Only a
   // grid put right cancels the timer; further moves on a broken grid neither
@@ -260,12 +285,14 @@ export default function App() {
     if (game.positions.length !== game.puzzle.clues.length) return;
     const saved: Saved = {
       difficulty: game.difficulty,
+      falseCard: game.puzzle.falseClue !== null,
       seed: game.puzzle.seed,
       size: game.puzzle.size,
       history: game.history.map(({ board: { cells, placed }, used }) => ({ cells, placed, used })),
       positions: game.positions,
       flipped: game.flipped,
       hintsUsed: game.hintsUsed,
+      suspects: game.suspects,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
@@ -331,20 +358,23 @@ export default function App() {
   const countHint = () =>
     setGame((current) => ({ ...current, hintsUsed: current.hintsUsed + 1 }));
 
-  const newGame = (difficulty: Difficulty) => {
+  const falseCard = game.puzzle.falseClue !== null;
+  const newGame = (difficulty: Difficulty, falseCard: boolean) => {
     clearNotices();
-    setGame(startGame(difficulty));
+    setGame(startGame(difficulty, falseCard));
   };
 
   /**
-   * Drops every board built on top of the wrong move. It tells the player where
-   * they went wrong, so it counts as a hint.
+   * Drops every board built on top of the wrong move, and withdraws an
+   * accusation of a true card. It tells the player where they went wrong, so it
+   * counts as a hint.
    */
   const rewind = () => {
     clearNotices();
     setGame((current) => ({
       ...current,
       history: rewindToLastGood(current.history, current.puzzle.solution),
+      suspects: withdrawWrongAccusation(current.suspects, current.puzzle.falseClue),
       hintsUsed: current.hintsUsed + 1,
     }));
   };
@@ -355,17 +385,19 @@ export default function App() {
    * moves on to the next one.
    *
    * On a broken grid nothing can be worked out, so the wrong-turn notice is
-   * brought up at once instead. That is the honest answer to "help me", and the
+   * brought up at once instead. The same goes for a wrong accusation: the grid
+   * may still have things to work out, but what the player most needs to know
+   * is that they have gone wrong. That is the honest answer to "help me", and the
    * player asked for it, so nothing is given away about when the mistake was
    * made.
    */
   const showHint = () => {
-    if (brokenIndex >= 0) {
+    if (warnWrongTurn) {
       countHint();
       revealNotice();
       return;
     }
-    const hints = findHints(board, game.puzzle.clues, used);
+    const hints = findHints(board, game.puzzle.clues, used, game.puzzle.falseClue);
     // Nothing to show, as on a solved grid, so nothing to count.
     if (hints.length === 0) return;
     countHint();
@@ -377,6 +409,25 @@ export default function App() {
   };
 
   const stopCelebrating = useCallback(() => setCelebrating(false), []);
+
+  const suspectClues = useCallback((indices: number[]) => {
+    setGame((current) => ({ ...current, suspects: addSuspects(current.suspects, indices) }));
+  }, []);
+
+  const clearSuspectClue = useCallback((index: number, point: Point) => {
+    setGame((current) => {
+      const positions = current.positions.slice();
+      positions[index] = point;
+      return { ...current, positions, suspects: clearSuspect(current.suspects, index) };
+    });
+  }, []);
+
+  const accuseClue = useCallback((index: number) => {
+    setGame((current) => ({ ...current, suspects: accuse(current.suspects, index) }));
+  }, []);
+
+  const falseClue = game.puzzle.falseClue;
+  const outcome = falseClue === null ? null : verdict(game.suspects, falseClue);
 
   const moveClue = useCallback((moves: Array<{ index: number; point: Point }>) => {
     setGame((current) => {
@@ -420,7 +471,7 @@ export default function App() {
         <select
           className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
           value={game.difficulty}
-          onChange={(event) => newGame(event.target.value as Difficulty)}
+          onChange={(event) => newGame(event.target.value as Difficulty, falseCard)}
         >
           {DIFFICULTIES.map((difficulty) => (
             <option key={difficulty} value={difficulty}>
@@ -429,7 +480,19 @@ export default function App() {
           ))}
         </select>
 
-        <Button onClick={() => newGame(game.difficulty)}>New puzzle</Button>
+        <label
+          className="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
+          title="One card is false. Find it, and solve the grid from the rest."
+        >
+          <input
+            type="checkbox"
+            checked={falseCard}
+            onChange={(event) => newGame(game.difficulty, event.target.checked)}
+          />
+          False card
+        </label>
+
+        <Button onClick={() => newGame(game.difficulty, falseCard)}>New puzzle</Button>
         <Button onClick={undo} disabled={game.history.length < 2}>
           Undo
         </Button>
@@ -447,7 +510,7 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-3 text-xs text-slate-500">
           <span>
-            {stats.clueCount} clues · seed {game.puzzle.seed}
+            {stats.clueCount} clues{falseCard ? ", one false" : ""} · seed {game.puzzle.seed}
           </span>
           <Button onClick={() => setShowHelp(true)}>Help</Button>
         </div>
@@ -461,6 +524,7 @@ export default function App() {
             <Board
               board={board}
               highlight={hint?.kind === "cell" ? hint : null}
+              markedExclusions={falseCard ? game.puzzle.exclusions : []}
               onPlace={handlePlace}
               onRuleOut={handleRuleOut}
               onHoverTile={hoverTile}
@@ -469,9 +533,20 @@ export default function App() {
           {solved && (
             <p className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
               Solved. Every column is settled.
+              {outcome === "found" && " And you found the false card."}
+              {outcome === "none" && " The false card is marked in red."}
+              {outcome === "wrong" &&
+                " The card you accused was true; the false one is marked in red."}
             </p>
           )}
-          {celebrating && <Confetti hintsUsed={game.hintsUsed} onDone={stopCelebrating} />}
+          {celebrating && (
+            // In a false-card puzzle, the full celebration is for accusing the
+            // right card; not doing so costs as much as one hint.
+            <Confetti
+              hintsUsed={game.hintsUsed + (outcome === null || outcome === "found" ? 0 : 1)}
+              onDone={stopCelebrating}
+            />
+          )}
 
           {/*
             The notice is always in the document and only its opacity changes.
@@ -492,7 +567,9 @@ export default function App() {
             }}
             aria-hidden={!noticeShown}
           >
-            <span>Something in this grid has gone wrong.</span>
+            {/* The same words whatever went wrong, the grid or an accusation, so
+                that the notice says only that something did. */}
+            <span>Something has gone wrong.</span>
             <Button onClick={rewind} title={REWIND_HINT}>
               Go back
             </Button>
@@ -510,7 +587,12 @@ export default function App() {
             onMove={moveClue}
             onToggleUsed={toggleUsed}
             onFlip={flipClues}
+            suspects={falseCard ? game.suspects : null}
+            onSuspect={suspectClues}
+            onClearSuspect={clearSuspectClue}
+            onAccuse={accuseClue}
             highlight={hint?.kind === "clue" ? hint.clueIndex : null}
+            revealedFalse={solved ? game.puzzle.falseClue : null}
             peeked={peeked}
             onHoverTile={hoverTile}
           />

@@ -90,12 +90,15 @@ export function findClueHints(
   board: BoardState,
   clues: Clue[],
   used: boolean[] = [],
+  falseClue: number | null = null,
 ): ClueHint[] {
   const baseline = settled(board);
   if (!baseline) return [];
 
   const hints: ClueHint[] = [];
   clues.forEach((clue, clueIndex) => {
+    // The false card would narrow the grid wrongly, so it is never offered.
+    if (clueIndex === falseClue) return;
     const after = Int32Array.from(baseline);
     if (!propagate(after, [clue], board.size).ok) return;
 
@@ -122,10 +125,20 @@ export function findClueHints(
  * need no clue at all, then the clues that still narrow the grid. Empty means
  * either the grid is finished or something has been ruled out wrongly.
  */
-export function findHints(board: BoardState, clues: Clue[], used: boolean[] = []): Hint[] {
-  return [...findCellHints(board), ...findClueHints(board, clues, used)];
+export function findHints(
+  board: BoardState,
+  clues: Clue[],
+  used: boolean[] = [],
+  falseClue: number | null = null,
+): Hint[] {
+  return [...findCellHints(board), ...findClueHints(board, clues, used, falseClue)];
 }
 
-export function findHint(board: BoardState, clues: Clue[], used: boolean[] = []): Hint | null {
-  return findHints(board, clues, used)[0] ?? null;
+export function findHint(
+  board: BoardState,
+  clues: Clue[],
+  used: boolean[] = [],
+  falseClue: number | null = null,
+): Hint | null {
+  return findHints(board, clues, used, falseClue)[0] ?? null;
 }

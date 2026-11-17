@@ -62,6 +62,8 @@ export type Puzzle = {
   clues: Clue[];
   /** Candidates already ruled out when the puzzle starts; empty on hard. */
   exclusions: Exclusion[];
+  /** Index of the one false clue in a false-card puzzle, otherwise null. */
+  falseClue: number | null;
   seed: number;
 };
 

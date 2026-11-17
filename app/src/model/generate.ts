@@ -1,5 +1,6 @@
 import { makeRng, shuffle, type Rng } from "./rng";
-import { isDeducible, solveByDeduction } from "./solver";
+import { addFalseCard } from "./falseCard";
+import { clueHolds, isDeducible, solveByDeduction } from "./solver";
 import {
   CLUE_KINDS,
   DEFAULT_SIZE,
@@ -46,6 +47,12 @@ export const DIFFICULTY_PRESETS: Record<
      * the puzzle needs survive, so the finished puzzle shows fewer than this.
      */
     exclusionPool: number;
+    /**
+     * In false-card mode, the most cards, false card included, that the
+     * smallest contradicting group may have. Two means the false card directly
+     * contradicts one other card.
+     */
+    falseGroup: number;
   }
 > = {
   easy: {
@@ -62,6 +69,7 @@ export const DIFFICULTY_PRESETS: Record<
     },
     clueRange: [21, 26],
     exclusionPool: 20,
+    falseGroup: 2,
   },
   medium: {
     poolCaps: {
@@ -77,6 +85,7 @@ export const DIFFICULTY_PRESETS: Record<
     },
     clueRange: [19, 24],
     exclusionPool: 10,
+    falseGroup: 3,
   },
   hard: {
     poolCaps: {
@@ -94,6 +103,7 @@ export const DIFFICULTY_PRESETS: Record<
     },
     clueRange: [17, 22],
     exclusionPool: 0,
+    falseGroup: 4,
   },
 };
 
@@ -114,6 +124,10 @@ export type GenerateOptions = {
   allowSameRowClues?: boolean;
   /** Wrong candidates offered as exclusions. Overrides the difficulty preset. */
   exclusionPool?: number;
+  /** Make one of the cards false. */
+  falseCard?: boolean;
+  /** Overrides the difficulty preset's `falseGroup`. */
+  maxFalseGroup?: number;
 };
 
 /** A random solution: each row is an independent permutation of its tiles. */
@@ -294,14 +308,68 @@ export function samplePool(pool: Clue[], caps: CluePoolCaps, size: number, rng: 
   return pool;
 }
 
+/** False cards tried per puzzle before moving on to the next seed. */
+const FALSE_CARD_ATTEMPTS = 40;
+
+/**
+ * Clues that are false for `solution` but look like the rest: each is true for
+ * a near miss of the solution, with two tiles of one row swapped, so it is
+ * wrong about one of those two tiles and right about everything else. The kind
+ * is drawn in proportion to the difficulty's pool caps, so the false card is no
+ * more likely to be a rare kind than any other card.
+ */
+export function falseCandidates(
+  solution: Solution,
+  caps: CluePoolCaps,
+  count: number,
+  rng: Rng,
+  allowSameRow: boolean,
+): Clue[] {
+  const size = solution.length;
+  const out: Clue[] = [];
+  for (let attempt = 0; out.length < count && attempt < count * 4; attempt++) {
+    const row = Math.floor(rng() * size);
+    const [x, y] = shuffle(
+      Array.from({ length: size }, (_, i) => i),
+      rng,
+    );
+    const nearMiss = solution.map((r) => r.slice());
+    [nearMiss[row][x], nearMiss[row][y]] = [nearMiss[row][y], nearMiss[row][x]];
+
+    const byKind = new Map<ClueKind, Clue[]>();
+    for (const clue of allTrueClues(nearMiss, allowSameRow)) {
+      if (clueHolds(clue, solution)) continue;
+      byKind.set(clue.kind, [...(byKind.get(clue.kind) ?? []), clue]);
+    }
+    const kinds = [...byKind.keys()];
+    const total = kinds.reduce((sum, kind) => sum + caps[kind], 0);
+    if (total === 0) continue;
+    let pick = rng() * total;
+    const kind = kinds.find((k) => (pick -= caps[k]) < 0) ?? kinds[kinds.length - 1];
+    const ofKind = byKind.get(kind)!;
+    out.push(ofKind[Math.floor(rng() * ofKind.length)]);
+  }
+  return out;
+}
+
 /** Builds exactly one puzzle from `seed`, with no retries. */
+type BuildOptions = {
+  size: number;
+  caps: CluePoolCaps;
+  allowSameRow: boolean;
+  exclusionPool: number;
+  /** Largest conflict group for a false card, or null for a puzzle without one. */
+  falseGroup: number | null;
+};
+
+/**
+ * Builds exactly one puzzle from `seed`, with no retries. Null when a
+ * false-card puzzle was asked for and none of the false cards tried worked.
+ */
 function buildPuzzle(
   seed: number,
-  size: number,
-  caps: CluePoolCaps,
-  allowSameRow: boolean,
-  exclusionPool: number,
-): Puzzle {
+  { size, caps, allowSameRow, exclusionPool, falseGroup }: BuildOptions,
+): Puzzle | null {
   const rng = makeRng(seed);
   const solution = randomSolution(size, rng);
   const pool = samplePool(allTrueClues(solution, allowSameRow), caps, size, rng);
@@ -310,8 +378,30 @@ function buildPuzzle(
   const offered = exclusionPool > 0 ? sampleExclusions(solution, exclusionPool, rng) : [];
   const minimal = minimise(pool, size, rng, offered);
   const exclusions = minimiseExclusions(minimal, offered, size);
-  const clues = minimal.map((clue) => maskBetweenOrder(clue, rng));
-  return { size, solution, clues: shuffle(clues, rng), exclusions, seed };
+
+  if (falseGroup === null) {
+    const clues = minimal.map((clue) => maskBetweenOrder(clue, rng));
+    return { size, solution, clues: shuffle(clues, rng), exclusions, falseClue: null, seed };
+  }
+
+  const candidates = falseCandidates(solution, caps, FALSE_CARD_ATTEMPTS, rng, allowSameRow);
+  const setup = addFalseCard(minimal, exclusions, candidates, pool, size, rng, {
+    maxGroup: falseGroup,
+    attempts: FALSE_CARD_ATTEMPTS,
+  });
+  if (!setup) return null;
+  const order = shuffle(
+    setup.clues.map((_, i) => i),
+    rng,
+  );
+  return {
+    size,
+    solution,
+    clues: order.map((i) => maskBetweenOrder(setup.clues[i], rng)),
+    exclusions: setup.exclusions,
+    falseClue: order.indexOf(setup.falseIndex),
+    seed,
+  };
 }
 
 const MAX_ATTEMPTS = 20;
@@ -327,19 +417,23 @@ export function generatePuzzle(options: GenerateOptions = {}): Puzzle {
   const caps = { ...preset.poolCaps, ...options.poolCaps };
   const allowSameRow = options.allowSameRowClues ?? true;
   const exclusionPool = options.exclusionPool ?? preset.exclusionPool;
-  const range = options.clueRange === undefined ? preset.clueRange : options.clueRange;
+  // A false-card puzzle carries the false card and any cards added to rule the
+  // others out, so the preset's count does not apply to it.
+  const range =
+    options.clueRange !== undefined ? options.clueRange : options.falseCard ? null : preset.clueRange;
   const firstSeed = options.seed ?? Math.floor(Math.random() * 0x7fffffff);
 
   let closest: Puzzle | null = null;
   let closestMiss = Infinity;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const puzzle = buildPuzzle(
-      (firstSeed + attempt) >>> 0,
+    const puzzle = buildPuzzle((firstSeed + attempt) >>> 0, {
       size,
       caps,
       allowSameRow,
       exclusionPool,
-    );
+      falseGroup: options.falseCard ? (options.maxFalseGroup ?? preset.falseGroup) : null,
+    });
+    if (!puzzle) continue;
     if (!range) return puzzle;
     const [min, max] = range;
     const count = puzzle.clues.length;
@@ -350,7 +444,10 @@ export function generatePuzzle(options: GenerateOptions = {}): Puzzle {
       closest = puzzle;
     }
   }
-  return closest!;
+  // Only reachable when all twenty attempts at a false-card puzzle failed. On
+  // hard about half of them fail, so this is roughly one in half a million.
+  if (!closest) throw new Error(`no puzzle could be built from seed ${firstSeed}`);
+  return closest;
 }
 
 export type PuzzleStats = {
@@ -366,6 +463,10 @@ export function puzzleStats(puzzle: Puzzle): PuzzleStats {
   return {
     clueCount: puzzle.clues.length,
     byKind,
-    passes: solveByDeduction(puzzle.clues, puzzle.size, puzzle.exclusions).passes,
+    passes: solveByDeduction(
+      puzzle.clues.filter((_, index) => index !== puzzle.falseClue),
+      puzzle.size,
+      puzzle.exclusions,
+    ).passes,
   };
 }

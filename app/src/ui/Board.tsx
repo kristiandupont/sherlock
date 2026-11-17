@@ -1,5 +1,5 @@
 import { candidatesAt, isReadyToPlace, placedTile, type BoardState } from "../game/board";
-import type { TileRef } from "../model/types";
+import type { Exclusion, TileRef } from "../model/types";
 import { TileGlyph } from "./TileGlyph";
 import { ROWS, tileName } from "./tileSets";
 
@@ -11,12 +11,26 @@ type Props = {
   onRuleOut: (row: number, col: number, tile: number) => void;
   /** Called with the tile under the pointer, and with null when it leaves. */
   onHoverTile: (tile: TileRef | null) => void;
+  /**
+   * Exclusions to draw as a dot rather than an empty slot. Only false-card
+   * puzzles pass any: there the exclusions are certain and the cards are not,
+   * so the player needs to tell them apart from their own eliminations.
+   */
+  markedExclusions: Exclusion[];
 };
 
-export function Board({ board, highlight, onPlace, onRuleOut, onHoverTile }: Props) {
+export function Board({
+  board,
+  highlight,
+  onPlace,
+  onRuleOut,
+  onHoverTile,
+  markedExclusions,
+}: Props) {
   const { size } = board;
   const slotColumns = Math.ceil(Math.sqrt(size));
   const slotRows = Math.ceil(size / slotColumns);
+  const marked = new Set(markedExclusions.map(({ row, col, tile }) => `${row}:${col}:${tile}`));
 
   return (
     <div className="select-none">
@@ -74,7 +88,20 @@ export function Board({ board, highlight, onPlace, onRuleOut, onHoverTile }: Pro
                   >
                     {Array.from({ length: size }, (_, tile) => {
                       const available = candidatesAt(board, row, col).includes(tile);
-                      if (!available) return <div key={tile} />;
+                      if (!available) {
+                        return marked.has(`${row}:${col}:${tile}`) ? (
+                          <div
+                            key={tile}
+                            data-excluded
+                            title={`${tileName(row, tile)} is not here (given)`}
+                            className="flex items-center justify-center"
+                          >
+                            <div className="h-1 w-1 rounded-full bg-slate-300" />
+                          </div>
+                        ) : (
+                          <div key={tile} />
+                        );
+                      }
                       return (
                         <button
                           key={tile}

@@ -70,6 +70,23 @@ export function Legend() {
           Fit to bring every clue into view.
         </p>
       </Section>
+      <Section title="False card">
+        <p>
+          With False card ticked, exactly one card on the canvas is false. Everything else is true,
+          including the candidates that start out ruled out, which are marked with a small dot.
+        </p>
+        <p>
+          Look for a few cards that cannot all be true at once. The false card is among them, and
+          every card outside that group can be trusted. Then work out which card in the group is
+          the false one. It can still be worked out without guessing, and Hint never points at it.
+        </p>
+        <p>
+          Drag cards you doubt into the Suspects strip below the canvas, and drag them back out
+          once they are cleared. Right-click a suspect to accuse it: an accused card is struck
+          through, meaning that what it says is not so. When the grid is solved, the false card is
+          marked in red, and accusing the right one earns the full celebration.
+        </p>
+      </Section>
       <Section title="Reading the clues">
         <div className="grid gap-x-8 gap-y-4 pt-1 sm:grid-cols-2">
           {EXAMPLES.map((clue) => (

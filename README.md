@@ -55,7 +55,8 @@ complete solve proves the solution is unique, and every puzzle can be solved by
 deduction alone. `countSolutions` checks this independently with backtracking,
 and the tests assert that the two agree.
 
-A puzzle link (`#hard-6x6-1834562211`) names the generator's input, so it stays
+A puzzle link (`#hard-6x6-1834562211`, or `#hard-falsecard-6x6-…` for a
+false-card puzzle) names the generator's input, so it stays
 valid only as long as the generator builds the same puzzle from the same seed.
 
 ## The clues
@@ -105,6 +106,43 @@ each one shown is needed. Removing information never lets propagation reach
 further, so the clues stay irreducible. About a third of the exclusions offered
 survive, and each replaces about half a clue. Hard draws none, and so builds
 the same puzzles it did before exclusions existed.
+
+## False card
+
+An optional mode, in `app/src/model/falseCard.ts`: exactly one card is false,
+and the player is told so. The exclusions stay true and are drawn as dots, so
+they can be told apart from the player's own eliminations.
+
+The generator builds a normal minimal puzzle, then adds a false card taken
+from a near miss of the solution (two tiles of one row swapped), so it looks
+like the rest. It requires that:
+
+- without the false card, the other cards solve the grid; and
+- supposing any other card were the false one leads to a contradiction under
+  propagation, so exactly one card can be the false one.
+
+Every contradicting group of cards contains the false card, since the true
+cards all hold for the solution. The difficulty's `falseGroup` limits the
+smallest such group (2 on easy, 3 on medium, 4 on hard), so the player can
+find the false card by looking for a few cards that conflict, rather than
+testing every card in turn. Where a card in that group cannot be ruled out by
+the rest, true cards are added from the pool, and the result is minimised again
+under both conditions.
+
+Below the canvas, a Suspects strip holds the cards the player doubts. Cards are
+dragged in and out of it, and right-clicking one there accuses it (one at a
+time). An accused card is struck through, since a false card means its opposite
+is true. When the grid is solved the accusation is judged: the full confetti
+needs the right card accused, and anything else costs as much as one hint. The
+strip and the accusation are saved but are not part of the undo history, like
+card positions (`app/src/game/suspects.ts`).
+
+The solver treats the false card as saying nothing. A player who reads "false"
+as "its opposite is true" knows more than that, so nothing the solver relies on
+is out of their reach. Hints never point at the false card, and it is marked
+once the grid is solved. These puzzles have about 24 cards whatever the
+difficulty, so the clue-count range is not applied, and generation takes about
+0.2–0.4 s, compared with a few milliseconds for a normal puzzle.
 
 ## The tiles
 

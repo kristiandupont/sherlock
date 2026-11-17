@@ -126,6 +126,22 @@ describe("findHints", () => {
     }
   });
 
+  it("solves a false-card puzzle by its hints, never pointing at the false card", () => {
+    for (const difficulty of ["easy", "hard"] as const) {
+      const puzzle = generatePuzzle({ seed: 3, difficulty, falseCard: true });
+      let board = startingBoard(puzzle.size, puzzle.exclusions);
+      let steps = 0;
+      while (!isComplete(board)) {
+        const hint = findHint(board, puzzle.clues, [], puzzle.falseClue);
+        expect(hint, `${difficulty} stalled after ${steps} hints`).not.toBeNull();
+        if (hint!.kind === "clue") expect(hint!.clueIndex).not.toBe(puzzle.falseClue);
+        board = act(board, hint!, puzzle.clues);
+        expect(++steps).toBeLessThan(500);
+      }
+      expect(isSolved(board, puzzle.solution), difficulty).toBe(true);
+    }
+  });
+
   it("has nothing to offer on a finished board", () => {
     const puzzle = generatePuzzle({ seed: 7 });
     expect(findHints(boardFromSolution(puzzle.solution), puzzle.clues)).toEqual([]);
