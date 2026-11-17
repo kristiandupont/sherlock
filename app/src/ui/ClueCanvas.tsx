@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Clue } from "../model/types";
+import type { Clue, TileRef } from "../model/types";
 import { ClueCard } from "./ClueCard";
 import {
   canFlip,
@@ -9,6 +9,7 @@ import {
   rectFromCorners,
   type Point,
 } from "./clueLayout";
+import { HoverTileContext } from "./hoverTile";
 
 type Props = {
   clues: Clue[];
@@ -26,6 +27,10 @@ type Props = {
   onFlip: (indices: number[]) => void;
   /** Index of the clue the hint points at, ringed and scrolled into view. */
   highlight: number | null;
+  /** Indices of the clues ringed by the Alt peek. */
+  peeked: ReadonlySet<number>;
+  /** Called with the tile under the pointer on a card, and with null when it leaves. */
+  onHoverTile: (tile: TileRef | null) => void;
 };
 
 /** Pointer travel, in screen pixels, before a press counts as a drag. */
@@ -66,6 +71,8 @@ export function ClueCanvas({
   onToggleUsed,
   onFlip,
   highlight,
+  peeked,
+  onHoverTile,
 }: Props) {
   const [cardDrag, setCardDrag] = useState<CardDrag | null>(null);
   const [band, setBand] = useState<Band | null>(null);
@@ -349,49 +356,51 @@ export function ClueCanvas({
               transformOrigin: "0 0",
             }}
           >
-            {clues.map((clue, index) => {
-              const point = positionOf(index);
-              const dragging = cardDrag?.origins.has(index) && cardDrag.moved;
-              const hinted = highlight === index;
-              const selected = selection.has(index);
-              return (
-                <div
-                  key={index}
-                  data-clue-index={index}
-                  data-selected={selected || undefined}
-                  className={`absolute touch-none ${dragging ? "cursor-grabbing" : "cursor-grab"} ${
-                    hinted ? "hint-ring rounded-lg" : ""
-                  }`}
-                  style={{
-                    left: point.x,
-                    top: point.y,
-                    zIndex: order.indexOf(index) + 1,
-                    transform: dragging ? "scale(1.04)" : undefined,
-                    filter: dragging ? "drop-shadow(0 6px 12px rgb(15 23 42 / 0.25))" : undefined,
-                    // An outline rather than a ring, so a selected card that is
-                    // also the hint can show both.
-                    outline: selected ? "2px solid rgb(79 70 229)" : undefined,
-                    outlineOffset: 2,
-                    borderRadius: "0.5rem",
-                  }}
-                  onPointerDown={(event) => startCardDrag(event, index)}
-                  onPointerMove={moveCardDrag}
-                  onPointerUp={endCardDrag}
-                  onPointerCancel={endCardDrag}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    onToggleUsed(index);
-                  }}
-                >
-                  <ClueCard
-                    clue={clue}
-                    size={size}
-                    used={(used[index] ?? false) && !hinted}
-                    flipped={flipped[index] ?? false}
-                  />
-                </div>
-              );
-            })}
+            <HoverTileContext.Provider value={onHoverTile}>
+              {clues.map((clue, index) => {
+                const point = positionOf(index);
+                const dragging = cardDrag?.origins.has(index) && cardDrag.moved;
+                const hinted = highlight === index;
+                const selected = selection.has(index);
+                return (
+                  <div
+                    key={index}
+                    data-clue-index={index}
+                    data-selected={selected || undefined}
+                    className={`absolute touch-none ${dragging ? "cursor-grabbing" : "cursor-grab"} ${
+                      hinted ? "hint-ring rounded-lg" : peeked.has(index) ? "peek-ring rounded-lg" : ""
+                    }`}
+                    style={{
+                      left: point.x,
+                      top: point.y,
+                      zIndex: order.indexOf(index) + 1,
+                      transform: dragging ? "scale(1.04)" : undefined,
+                      filter: dragging ? "drop-shadow(0 6px 12px rgb(15 23 42 / 0.25))" : undefined,
+                      // An outline rather than a ring, so a selected card that is
+                      // also the hint can show both.
+                      outline: selected ? "2px solid rgb(79 70 229)" : undefined,
+                      outlineOffset: 2,
+                      borderRadius: "0.5rem",
+                    }}
+                    onPointerDown={(event) => startCardDrag(event, index)}
+                    onPointerMove={moveCardDrag}
+                    onPointerUp={endCardDrag}
+                    onPointerCancel={endCardDrag}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      onToggleUsed(index);
+                    }}
+                  >
+                    <ClueCard
+                      clue={clue}
+                      size={size}
+                      used={(used[index] ?? false) && !hinted}
+                      flipped={flipped[index] ?? false}
+                    />
+                  </div>
+                );
+              })}
+            </HoverTileContext.Provider>
 
             {bandRect && (
               <div

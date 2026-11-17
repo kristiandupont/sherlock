@@ -61,6 +61,10 @@ export function Legend() {
           them easier to read.
         </p>
         <p>
+          Hold Alt (Option on a Mac) and point at any symbol, on the grid or on a card, to ring
+          every clue that mentions it.
+        </p>
+        <p>
           Scroll to move around the canvas, ⌘/Ctrl-scroll or the buttons in the corner to zoom, and
           Fit to bring every clue into view.
         </p>

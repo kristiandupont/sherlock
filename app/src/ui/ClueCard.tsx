@@ -1,6 +1,8 @@
+import { useContext } from "react";
 import type { Clue, TileRef } from "../model/types";
 import { TileGlyph } from "./TileGlyph";
 import { cardSize, describeClue } from "./clueLayout";
+import { HoverTileContext } from "./hoverTile";
 
 const GLYPH = 30;
 
@@ -9,11 +11,18 @@ const GLYPH = 30;
  * tiles stacked vertically share a column, and a dashed arrow means "somewhere
  * further right" with any distance in between.
  */
-const Cell = ({ of, tinted }: { of: TileRef; tinted?: boolean }) => (
-  <div className={`px-1 py-0.5 ${tinted ? "bg-slate-100" : ""}`}>
-    <TileGlyph row={of.row} tile={of.tile} size={GLYPH} />
-  </div>
-);
+const Cell = ({ of, tinted }: { of: TileRef; tinted?: boolean }) => {
+  const onHoverTile = useContext(HoverTileContext);
+  return (
+    <div
+      className={`px-1 py-0.5 ${tinted ? "bg-slate-100" : ""}`}
+      onPointerEnter={onHoverTile ? () => onHoverTile(of) : undefined}
+      onPointerLeave={onHoverTile ? () => onHoverTile(null) : undefined}
+    >
+      <TileGlyph row={of.row} tile={of.tile} size={GLYPH} />
+    </div>
+  );
+};
 
 /**
  * `reversed` mirrors the strip. The children keep their order in the DOM, so

@@ -1,4 +1,5 @@
 import { candidatesAt, isReadyToPlace, placedTile, type BoardState } from "../game/board";
+import type { TileRef } from "../model/types";
 import { TileGlyph } from "./TileGlyph";
 import { ROWS, tileName } from "./tileSets";
 
@@ -8,9 +9,11 @@ type Props = {
   highlight: { row: number; col: number } | null;
   onPlace: (row: number, col: number, tile: number) => void;
   onRuleOut: (row: number, col: number, tile: number) => void;
+  /** Called with the tile under the pointer, and with null when it leaves. */
+  onHoverTile: (tile: TileRef | null) => void;
 };
 
-export function Board({ board, highlight, onPlace, onRuleOut }: Props) {
+export function Board({ board, highlight, onPlace, onRuleOut, onHoverTile }: Props) {
   const { size } = board;
   const slotColumns = Math.ceil(Math.sqrt(size));
   const slotRows = Math.ceil(size / slotColumns);
@@ -54,6 +57,8 @@ export function Board({ board, highlight, onPlace, onRuleOut }: Props) {
                     className="flex h-full w-full items-center justify-center"
                     title={tileName(row, placed)}
                     onContextMenu={(event) => event.preventDefault()}
+                    onPointerEnter={() => onHoverTile({ row, tile: placed })}
+                    onPointerLeave={() => onHoverTile(null)}
                   >
                     <TileGlyph row={row} tile={placed} size={38} />
                   </button>
@@ -77,6 +82,8 @@ export function Board({ board, highlight, onPlace, onRuleOut }: Props) {
                           className="flex items-center justify-center rounded-sm transition hover:bg-slate-200"
                           title={`${tileName(row, tile)} — click to place, right-click to rule out`}
                           onClick={() => onPlace(row, col, tile)}
+                          onPointerEnter={() => onHoverTile({ row, tile })}
+                          onPointerLeave={() => onHoverTile(null)}
                           onContextMenu={(event) => {
                             event.preventDefault();
                             onRuleOut(row, col, tile);

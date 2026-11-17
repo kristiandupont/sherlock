@@ -31,3 +31,13 @@ html,
 .hint-ring {
   animation: hint-ring 4.5s ease-out forwards;
 }
+
+/*
+ * Ring drawn around every clue that mentions the tile under the pointer while
+ * Alt is held. The same colour as the hint ring, so the two read as the same
+ * kind of aid, but thinner, fainter and steady: it is there for as long as the
+ * player holds the key and goes the moment they let go.
+ */
+.peek-ring {
+  box-shadow: 0 0 0 2px rgb(245 158 11 / 0.55);
+}

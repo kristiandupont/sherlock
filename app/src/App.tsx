@@ -9,6 +9,7 @@ import {
 } from "./game/board";
 import { findHints, type Hint } from "./game/hint";
 import { firstBrokenIndex, rewindToLastGood, type Snapshot } from "./game/history";
+import { cluesMentioning } from "./game/peek";
 import { DIFFICULTIES, parsePuzzleHash, puzzleHash, type PuzzleLink } from "./game/link";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
 import type { Puzzle } from "./model/types";
@@ -17,6 +18,7 @@ import { ClueCanvas } from "./ui/ClueCanvas";
 import { Confetti } from "./ui/Confetti";
 import { HelpDialog } from "./ui/HelpDialog";
 import { flipsForPuzzle, layoutCluesByKind, type Point } from "./ui/clueLayout";
+import { usePeek } from "./ui/usePeek";
 
 const STORAGE_KEY = "sherlock:game:v4";
 
@@ -174,6 +176,11 @@ export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const { board, used } = game.history[game.history.length - 1];
+  const { peekTile, hoverTile } = usePeek();
+  const peeked = useMemo(
+    () => new Set(peekTile ? cluesMentioning(game.puzzle.clues, peekTile) : []),
+    [game.puzzle.clues, peekTile],
+  );
   const solved = useMemo(() => isSolved(board, game.puzzle.solution), [board, game.puzzle]);
   const complete = useMemo(() => isComplete(board), [board]);
   const [celebrating, setCelebrating] = useState(false);
@@ -448,6 +455,7 @@ export default function App() {
               highlight={hint?.kind === "cell" ? hint : null}
               onPlace={handlePlace}
               onRuleOut={handleRuleOut}
+              onHoverTile={hoverTile}
             />
           </div>
           {solved && (
@@ -495,6 +503,8 @@ export default function App() {
             onToggleUsed={toggleUsed}
             onFlip={flipClues}
             highlight={hint?.kind === "clue" ? hint.clueIndex : null}
+            peeked={peeked}
+            onHoverTile={hoverTile}
           />
         </section>
       </main>
