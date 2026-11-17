@@ -18,14 +18,18 @@ const FADE_FROM = 0.78;
  */
 const CANNON_RISE = 36;
 /**
- * The physics advance in fixed steps of a 60 Hz frame, however often the
- * browser actually draws. Stepping once per drawn frame ran the whole
- * celebration at double speed on a 120 Hz display.
+ * Speeds, gravity and spin are given per tick, a 60th of a second, before
+ * scaling to the window's height. A tick is only a unit of time: positions
+ * are worked out from the elapsed time on every frame the browser draws,
+ * so the confetti moves at the display's full frame rate and follows the
+ * same path at 60 Hz, 120 Hz or any rate in between.
  */
-const STEP_MS = 1000 / 60;
-/** Gravity and launch speeds per step, before scaling to the window's height. */
+const TICK_MS = 1000 / 60;
 const GRAVITY = 0.32;
+/** Share of its speed a piece keeps after one tick, from air resistance. */
 const DRAG = 0.994;
+/** The same drag as a rate: velocity decays as e^(-DRAG_RATE · ticks). */
+const DRAG_RATE = -Math.log(DRAG);
 const MIN_SPEED = 13;
 const MAX_SPEED = 28;
 /**
@@ -35,25 +39,35 @@ const MAX_SPEED = 28;
  */
 const PEAK_SHARE = 0.92;
 
+/**
+ * Distance travelled along one axis after `t` ticks, starting at speed `v0`
+ * under a constant acceleration `a` (gravity on the vertical axis, 0 on the
+ * horizontal one) and the drag above. This is the exact solution of
+ * dv/dt = a − DRAG_RATE·v, so nothing is accumulated from frame to frame.
+ */
+function travel(v0: number, a: number, t: number): number {
+  const terminal = a / DRAG_RATE;
+  return terminal * t + ((v0 - terminal) * (1 - Math.exp(-DRAG_RATE * t))) / DRAG_RATE;
+}
+
 /** How high a piece fired straight up at this speed climbs, in unscaled pixels. */
 function peakHeight(speed: number): number {
-  let vy = -speed;
-  let y = 0;
-  while (vy < 0) {
-    vy = (vy + GRAVITY) * DRAG;
-    y += vy;
-  }
-  return -y;
+  const terminal = GRAVITY / DRAG_RATE;
+  // The moment the upward velocity has fallen to zero.
+  const top = Math.log((terminal + speed) / terminal) / DRAG_RATE;
+  return -travel(-speed, GRAVITY, top);
 }
 
 const UNSCALED_PEAK = peakHeight(MAX_SPEED);
 
+/** A piece as it leaves its cannon; where it is later is worked out from these. */
 type Piece = {
   x: number;
   y: number;
   vx: number;
   vy: number;
   angle: number;
+  /** Radians per tick. */
   spin: number;
   width: number;
   height: number;
@@ -151,7 +165,6 @@ export function Confetti({ hintsUsed, onDone }: Props) {
       makePieces(volley.cannon, volley.pieces, volley.at, simWidth, simHeight, scale),
     );
     const start = performance.now();
-    let steps = 0;
     let frame = 0;
 
     const draw = (now: number) => {
@@ -163,19 +176,6 @@ export function Confetti({ hintsUsed, onDone }: Props) {
         return;
       }
 
-      for (; steps * STEP_MS < elapsed; steps++) {
-        const time = steps * STEP_MS;
-        for (const piece of pieces) {
-          if (time < piece.firedAt) continue;
-          piece.vy += gravity;
-          piece.vx *= DRAG;
-          piece.vy *= DRAG;
-          piece.x += piece.vx;
-          piece.y += piece.vy;
-          piece.angle += piece.spin;
-        }
-      }
-
       const progress = elapsed / DURATION_MS;
       context.globalAlpha =
         progress < FADE_FROM ? 1 : 1 - (progress - FADE_FROM) / (1 - FADE_FROM);
@@ -184,9 +184,12 @@ export function Confetti({ hintsUsed, onDone }: Props) {
 
       for (const piece of pieces) {
         if (elapsed < piece.firedAt) continue;
+        const ticks = (elapsed - piece.firedAt) / TICK_MS;
+        const x = piece.x + travel(piece.vx, 0, ticks);
+        const y = piece.y + travel(piece.vy, gravity, ticks);
         context.save();
-        context.translate(piece.x * toX, piece.y * toY);
-        context.rotate(piece.angle);
+        context.translate(x * toX, y * toY);
+        context.rotate(piece.angle + piece.spin * ticks);
         context.fillStyle = piece.colour;
         if (piece.round) {
           context.beginPath();

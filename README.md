@@ -272,8 +272,10 @@ The cannons sit just inside the bottom edge, so the pieces are seen leaving the
 cannon, and the volleys run together into one burst.
 
 Launch speeds and gravity are scaled to the window's height, so the fastest piece
-stops just short of the top edge on any screen. The physics advance in fixed
-60 Hz steps, so a 120 Hz display does not play the celebration at double speed.
+stops just short of the top edge on any screen. Each frame computes every
+piece's position from the time since it was fired, using the exact solution for
+gravity with drag, so the confetti moves at the display's full frame rate and
+follows the same path and timing at 60 Hz or 120 Hz.
 If the window is resized or moved to a screen with another pixel ratio during the
 run, the canvas is resized and the pieces are mapped onto the new size.
 
