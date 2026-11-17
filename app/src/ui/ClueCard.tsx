@@ -208,9 +208,11 @@ export function ClueCard({
     }
   };
 
+  // `shrink-0`: the size comes from `cardSize`, and a card set in a flex row
+  // next to text (as in the help) was squeezed narrower than its contents.
   return (
     <div
-      className={`flex items-center justify-center rounded-lg border bg-white shadow-sm transition ${
+      className={`flex shrink-0 items-center justify-center rounded-lg border bg-white shadow-sm transition ${
         used ? "border-slate-200 opacity-35 grayscale" : "border-slate-300"
       }`}
       style={{ width, height }}

@@ -18,10 +18,19 @@ const EXAMPLES: Clue[] = [
   { kind: "at-an-end", a },
 ];
 
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
 export function Legend() {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-      <div className="mb-3 space-y-1.5 text-slate-600">
+    <div className="space-y-6 text-sm leading-relaxed text-slate-600">
+      <Section title="The puzzle">
         <p className="text-slate-700">
           Sherlock is a deduction puzzle. The grid has six rows, each holding six symbols of one
           kind, and every symbol belongs in exactly one of the six columns. The clues on the canvas
@@ -34,13 +43,15 @@ export function Legend() {
           symbol once you know it belongs there. Hint points at something you could work out next,
           and keeps count.
         </p>
-        <p>
-          Left-click a small symbol to place it, right-click to rule it out.
-        </p>
+      </Section>
+      <Section title="The grid">
+        <p>Left-click a small symbol to place it, right-click to rule it out.</p>
+      </Section>
+      <Section title="The clue canvas">
         <p>
           Drag clue cards anywhere on the canvas, and right-click one to grey it out once you have
-          used it. Drag a box across empty canvas to select several cards, then drag any of them to move
-          the whole group; shift-click adds or removes a single card, and Escape clears the
+          used it. Drag a box across empty canvas to select several cards, then drag any of them to
+          move the whole group; shift-click adds or removes a single card, and Escape clears the
           selection.
         </p>
         <p>
@@ -53,16 +64,18 @@ export function Legend() {
           Scroll to move around the canvas, ⌘/Ctrl-scroll or the buttons in the corner to zoom, and
           Fit to bring every clue into view.
         </p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {EXAMPLES.map((clue) => (
-          <div key={clue.kind} className="flex items-center gap-3">
-            <ClueCard clue={clue} size={DEFAULT_SIZE} used={false} flipped={false} />
-            <span className="text-slate-600">{describeClue(clue)}</span>
-          </div>
-        ))}
-      </div>
-      <p className="mt-3 border-t border-slate-200 pt-2 text-xs text-slate-500">
+      </Section>
+      <Section title="Reading the clues">
+        <div className="grid gap-x-8 gap-y-4 pt-1 sm:grid-cols-2">
+          {EXAMPLES.map((clue) => (
+            <div key={clue.kind} className="flex items-center gap-3">
+              <ClueCard clue={clue} size={DEFAULT_SIZE} used={false} flipped={false} />
+              <span>{describeClue(clue)}</span>
+            </div>
+          ))}
+        </div>
+      </Section>
+      <p className="border-t border-slate-200 pt-3 text-xs text-slate-500">
         Based on{" "}
         <a
           className="text-indigo-700 underline hover:text-indigo-900"

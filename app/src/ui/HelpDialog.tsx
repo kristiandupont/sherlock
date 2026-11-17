@@ -23,7 +23,7 @@ export function HelpDialog({ open, onClose }: Props) {
   return (
     <dialog
       ref={dialogRef}
-      aria-label="Help"
+      aria-labelledby="help-title"
       // Escape closes the dialog without going through React, so the state is
       // brought in line here.
       onClose={onClose}
@@ -32,18 +32,23 @@ export function HelpDialog({ open, onClose }: Props) {
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      className="w-[min(56rem,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] overflow-auto rounded-xl bg-transparent p-0 backdrop:bg-slate-900/40"
+      className="w-[min(56rem,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] overflow-auto rounded-xl bg-white p-0 shadow-xl backdrop:bg-slate-900/40"
     >
-      <div className="relative">
-        <button
-          type="button"
-          title="Close help"
-          onClick={onClose}
-          className="absolute right-2 top-2 h-7 w-7 rounded text-lg leading-none text-slate-500 hover:bg-slate-100"
-        >
-          ×
-        </button>
-        <Legend />
+      <div>
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-8 py-4">
+          <h2 id="help-title" className="text-lg font-semibold text-slate-800">How to play Sherlock</h2>
+          <button
+            type="button"
+            title="Close help"
+            onClick={onClose}
+            className="h-8 w-8 rounded text-xl leading-none text-slate-500 hover:bg-slate-100"
+          >
+            ×
+          </button>
+        </header>
+        <div className="px-8 pb-6 pt-5">
+          <Legend />
+        </div>
       </div>
     </dialog>
   );
