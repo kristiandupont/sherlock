@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { popCount } from "../model/bits";
 import { generatePuzzle } from "../model/generate";
 import {
   boardFromSolution,
@@ -11,6 +12,7 @@ import {
   placeTile,
   placedTile,
   removeCandidate,
+  startingBoard,
 } from "./board";
 
 const SIZE = 6;
@@ -20,6 +22,17 @@ describe("board", () => {
     const board = emptyBoard(SIZE);
     expect(candidatesAt(board, 0, 0)).toEqual([0, 1, 2, 3, 4, 5]);
     expect(isComplete(board)).toBe(false);
+  });
+
+  it("starts a puzzle with its exclusions ruled out and nothing placed", () => {
+    const { size, exclusions, solution } = generatePuzzle({ seed: 3, difficulty: "easy" });
+    const board = startingBoard(size, exclusions);
+    for (const { row, col, tile } of exclusions)
+      expect(candidatesAt(board, row, col)).not.toContain(tile);
+    const ruledOut = board.cells.flat().reduce((sum, mask) => sum + size - popCount(mask), 0);
+    expect(ruledOut).toBe(exclusions.length);
+    expect(board.placed.flat().some(Boolean)).toBe(false);
+    expect(mistakes(board, solution)).toEqual([]);
   });
 
   it("takes a placed tile out of the rest of its row", () => {

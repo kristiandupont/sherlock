@@ -5,6 +5,7 @@ import {
   DEFAULT_SIZE,
   type Clue,
   type ClueKind,
+  type Exclusion,
   type Puzzle,
   type Solution,
 } from "./types";
@@ -37,7 +38,15 @@ export type Difficulty = "easy" | "medium" | "hard";
  */
 export const DIFFICULTY_PRESETS: Record<
   Difficulty,
-  { poolCaps: CluePoolCaps; clueRange: [number, number] }
+  {
+    poolCaps: CluePoolCaps;
+    clueRange: [number, number];
+    /**
+     * Wrong candidates offered to the minimiser as exclusions. Only the ones
+     * the puzzle needs survive, so the finished puzzle shows fewer than this.
+     */
+    exclusionPool: number;
+  }
 > = {
   easy: {
     poolCaps: {
@@ -51,7 +60,8 @@ export const DIFFICULTY_PRESETS: Record<
       "at-an-end": 12,
       "next-to-either": 25,
     },
-    clueRange: [23, 28],
+    clueRange: [21, 26],
+    exclusionPool: 20,
   },
   medium: {
     poolCaps: {
@@ -65,7 +75,8 @@ export const DIFFICULTY_PRESETS: Record<
       "at-an-end": 12,
       "next-to-either": 40,
     },
-    clueRange: [20, 25],
+    clueRange: [19, 24],
+    exclusionPool: 10,
   },
   hard: {
     poolCaps: {
@@ -82,6 +93,7 @@ export const DIFFICULTY_PRESETS: Record<
       "next-to-either": 26,
     },
     clueRange: [17, 22],
+    exclusionPool: 0,
   },
 };
 
@@ -100,6 +112,8 @@ export type GenerateOptions = {
   clueRange?: [number, number] | null;
   /** Allow clues that relate two tiles from the same row. */
   allowSameRowClues?: boolean;
+  /** Wrong candidates offered as exclusions. Overrides the difficulty preset. */
+  exclusionPool?: number;
 };
 
 /** A random solution: each row is an independent permutation of its tiles. */
@@ -189,7 +203,12 @@ export function allTrueClues(solution: Solution, allowSameRow = true): Clue[] {
  * Drops clues one at a time, keeping a removal whenever the puzzle still solves
  * by deduction. The result is irreducible: every remaining clue is needed.
  */
-export function minimise(pool: Clue[], size: number, rng: Rng): Clue[] {
+export function minimise(
+  pool: Clue[],
+  size: number,
+  rng: Rng,
+  exclusions: Exclusion[] = [],
+): Clue[] {
   const order = shuffle(
     pool.map((_, index) => index),
     rng,
@@ -206,16 +225,49 @@ export function minimise(pool: Clue[], size: number, rng: Rng): Clue[] {
     for (let start = 0; start < pending.length; start += blockSize) {
       const block = pending.slice(start, start + blockSize);
       for (const index of block) kept[index] = 0;
-      if (!isDeducible(live(), size)) for (const index of block) kept[index] = 1;
+      if (!isDeducible(live(), size, exclusions)) for (const index of block) kept[index] = 1;
     }
   }
 
   for (const index of order) {
     if (kept[index] === 0) continue;
     kept[index] = 0;
-    if (!isDeducible(live(), size)) kept[index] = 1;
+    if (!isDeducible(live(), size, exclusions)) kept[index] = 1;
   }
   return live();
+}
+
+/**
+ * `count` wrong candidates drawn at random: cells paired with a tile that does
+ * not belong there.
+ */
+export function sampleExclusions(solution: Solution, count: number, rng: Rng): Exclusion[] {
+  const size = solution.length;
+  const wrong: Exclusion[] = [];
+  for (let row = 0; row < size; row++)
+    for (let col = 0; col < size; col++)
+      for (let tile = 0; tile < size; tile++)
+        if (solution[row][col] !== tile) wrong.push({ row, col, tile });
+  return shuffle(wrong, rng).slice(0, count);
+}
+
+/**
+ * Drops the exclusions the clues do not need, one at a time, after the clues
+ * have been minimised against all of them. Taking information away never makes
+ * propagation reach further, so a clue that was needed with every exclusion in
+ * place is still needed with fewer, and the result is irreducible in both.
+ */
+export function minimiseExclusions(
+  clues: Clue[],
+  exclusions: Exclusion[],
+  size: number,
+): Exclusion[] {
+  const kept = exclusions.slice();
+  for (let i = kept.length - 1; i >= 0; i--) {
+    const without = kept.filter((_, index) => index !== i);
+    if (isDeducible(clues, size, without)) kept.splice(i, 1);
+  }
+  return kept;
 }
 
 /** Hides which side of `middle` each outer tile is on. */
@@ -243,12 +295,23 @@ export function samplePool(pool: Clue[], caps: CluePoolCaps, size: number, rng: 
 }
 
 /** Builds exactly one puzzle from `seed`, with no retries. */
-function buildPuzzle(seed: number, size: number, caps: CluePoolCaps, allowSameRow: boolean): Puzzle {
+function buildPuzzle(
+  seed: number,
+  size: number,
+  caps: CluePoolCaps,
+  allowSameRow: boolean,
+  exclusionPool: number,
+): Puzzle {
   const rng = makeRng(seed);
   const solution = randomSolution(size, rng);
   const pool = samplePool(allTrueClues(solution, allowSameRow), caps, size, rng);
-  const clues = minimise(pool, size, rng).map((clue) => maskBetweenOrder(clue, rng));
-  return { size, solution, clues: shuffle(clues, rng), seed };
+  // Drawn only when there are any to draw, so that a preset without exclusions
+  // takes nothing from the random sequence and builds the puzzles it always has.
+  const offered = exclusionPool > 0 ? sampleExclusions(solution, exclusionPool, rng) : [];
+  const minimal = minimise(pool, size, rng, offered);
+  const exclusions = minimiseExclusions(minimal, offered, size);
+  const clues = minimal.map((clue) => maskBetweenOrder(clue, rng));
+  return { size, solution, clues: shuffle(clues, rng), exclusions, seed };
 }
 
 const MAX_ATTEMPTS = 20;
@@ -263,13 +326,20 @@ export function generatePuzzle(options: GenerateOptions = {}): Puzzle {
   const preset = DIFFICULTY_PRESETS[difficulty];
   const caps = { ...preset.poolCaps, ...options.poolCaps };
   const allowSameRow = options.allowSameRowClues ?? true;
+  const exclusionPool = options.exclusionPool ?? preset.exclusionPool;
   const range = options.clueRange === undefined ? preset.clueRange : options.clueRange;
   const firstSeed = options.seed ?? Math.floor(Math.random() * 0x7fffffff);
 
   let closest: Puzzle | null = null;
   let closestMiss = Infinity;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const puzzle = buildPuzzle((firstSeed + attempt) >>> 0, size, caps, allowSameRow);
+    const puzzle = buildPuzzle(
+      (firstSeed + attempt) >>> 0,
+      size,
+      caps,
+      allowSameRow,
+      exclusionPool,
+    );
     if (!range) return puzzle;
     const [min, max] = range;
     const count = puzzle.clues.length;
@@ -296,6 +366,6 @@ export function puzzleStats(puzzle: Puzzle): PuzzleStats {
   return {
     clueCount: puzzle.clues.length,
     byKind,
-    passes: solveByDeduction(puzzle.clues, puzzle.size).passes,
+    passes: solveByDeduction(puzzle.clues, puzzle.size, puzzle.exclusions).passes,
   };
 }

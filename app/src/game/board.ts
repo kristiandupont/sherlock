@@ -1,5 +1,5 @@
 import { bit, bitList, fullMask, isSingle, lowestBit, popCount } from "../model/bits";
-import type { Solution } from "../model/types";
+import type { Exclusion, Solution } from "../model/types";
 
 /**
  * What the player sees: `cells[row][col]` is the set of tiles still possible in
@@ -22,6 +22,17 @@ export const emptyBoard = (size: number): BoardState => ({
   cells: Array.from({ length: size }, () => new Array<number>(size).fill(fullMask(size))),
   placed: Array.from({ length: size }, () => new Array<boolean>(size).fill(false)),
 });
+
+/**
+ * The board a puzzle starts from: every candidate open except the ones its
+ * exclusions rule out. These are the first snapshot of the history, so undo
+ * and Go back can never bring them back.
+ */
+export function startingBoard(size: number, exclusions: Exclusion[]): BoardState {
+  const board = emptyBoard(size);
+  for (const { row, col, tile } of exclusions) board.cells[row][col] &= ~bit(tile);
+  return board;
+}
 
 const cloneCells = (board: BoardState): number[][] => board.cells.map((row) => row.slice());
 

@@ -13,6 +13,7 @@ import {
   placeTile,
   positionsToBoard,
   removeCandidate,
+  startingBoard,
   type BoardState,
 } from "./board";
 import { findCellHints, findClueHints, findHint, findHints, type Hint } from "./hint";
@@ -112,7 +113,7 @@ describe("findHints", () => {
     for (const difficulty of ["easy", "medium", "hard"] as const) {
       for (let seed = 0; seed < 5; seed++) {
         const puzzle = generatePuzzle({ seed, difficulty });
-        let board = emptyBoard(puzzle.size);
+        let board = startingBoard(puzzle.size, puzzle.exclusions);
         let steps = 0;
         while (!isComplete(board)) {
           const hint = findHint(board, puzzle.clues);
@@ -134,7 +135,7 @@ describe("findHints", () => {
 describe("findClueHints", () => {
   it("only ever names a clue that really does change the grid", () => {
     const puzzle = generatePuzzle({ seed: 6 });
-    let board = emptyBoard(puzzle.size);
+    let board = startingBoard(puzzle.size, puzzle.exclusions);
     for (let step = 0; step < 5; step++) {
       const hints = findClueHints(board, puzzle.clues);
       for (const hint of hints) {

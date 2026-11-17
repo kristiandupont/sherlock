@@ -9,7 +9,7 @@ import {
   shiftDown,
   shiftUp,
 } from "./bits";
-import { tileId, type Clue, type Solution } from "./types";
+import { tileId, type Clue, type Exclusion, type Solution } from "./types";
 
 /**
  * Solver state: `pos[tileId]` is the set of columns still possible for that
@@ -249,9 +249,23 @@ export function propagate(
   return { ok: true, passes };
 }
 
-/** Solves using propagation alone — no guessing, the way a player would. */
-export function solveByDeduction(clues: Clue[], size: number): SolveResult {
+/**
+ * The board a puzzle starts from: every column open to every tile, except the
+ * ones its exclusions rule out.
+ */
+export function startPositions(size: number, exclusions: Exclusion[] = []): PosMask {
   const pos = openPositions(size);
+  for (const { row, col, tile } of exclusions) pos[row * size + tile] &= ~(1 << col);
+  return pos;
+}
+
+/** Solves using propagation alone — no guessing, the way a player would. */
+export function solveByDeduction(
+  clues: Clue[],
+  size: number,
+  exclusions: Exclusion[] = [],
+): SolveResult {
+  const pos = startPositions(size, exclusions);
   const { ok, passes } = propagate(pos, clues, size);
   let solved = ok;
   if (ok) {
@@ -266,15 +280,20 @@ export function solveByDeduction(clues: Clue[], size: number): SolveResult {
 }
 
 /** True if the clues pin down the whole grid by deduction alone. */
-export const isDeducible = (clues: Clue[], size: number): boolean =>
-  solveByDeduction(clues, size).solved;
+export const isDeducible = (clues: Clue[], size: number, exclusions: Exclusion[] = []): boolean =>
+  solveByDeduction(clues, size, exclusions).solved;
 
 /**
  * Counts solutions with propagation plus backtracking, stopping at `limit`.
  * Not used during generation — it is the independent check that the deduction
  * solver's answer really is the only one.
  */
-export function countSolutions(clues: Clue[], size: number, limit = 2): number {
+export function countSolutions(
+  clues: Clue[],
+  size: number,
+  limit = 2,
+  exclusions: Exclusion[] = [],
+): number {
   let found = 0;
 
   const search = (pos: PosMask): void => {
@@ -304,7 +323,7 @@ export function countSolutions(clues: Clue[], size: number, limit = 2): number {
     }
   };
 
-  search(openPositions(size));
+  search(startPositions(size, exclusions));
   return found;
 }
 

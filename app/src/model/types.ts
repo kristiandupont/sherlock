@@ -49,10 +49,19 @@ export const CLUE_KINDS: ClueKind[] = [
 /** `solution[row][col]` is the index of the tile from `row` placed in `col`. */
 export type Solution = number[][];
 
+/**
+ * A candidate removed before play starts: `tile` of `row` is not in column
+ * `col`. Unlike a clue it names a column, which is why it is shown on the grid
+ * rather than as a card. Every exclusion is true of the solution.
+ */
+export type Exclusion = { row: number; col: number; tile: number };
+
 export type Puzzle = {
   size: number;
   solution: Solution;
   clues: Clue[];
+  /** Candidates already ruled out when the puzzle starts; empty on hard. */
+  exclusions: Exclusion[];
   seed: number;
 };
 

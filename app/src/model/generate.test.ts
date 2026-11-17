@@ -43,8 +43,8 @@ describe("generatePuzzle", () => {
         const puzzle = generatePuzzle({ seed, difficulty });
         const where = `${difficulty} seed ${seed}`;
         for (const clue of puzzle.clues) expect(clueHolds(clue, puzzle.solution), where).toBe(true);
-        expect(isDeducible(puzzle.clues, puzzle.size), where).toBe(true);
-        expect(countSolutions(puzzle.clues, puzzle.size, 2), where).toBe(1);
+        expect(isDeducible(puzzle.clues, puzzle.size, puzzle.exclusions), where).toBe(true);
+        expect(countSolutions(puzzle.clues, puzzle.size, 2, puzzle.exclusions), where).toBe(1);
       }
     }
   });
@@ -53,7 +53,9 @@ describe("generatePuzzle", () => {
     const puzzle = generatePuzzle({ seed: 42 });
     for (let i = 0; i < puzzle.clues.length; i++) {
       const without = puzzle.clues.filter((_, index) => index !== i);
-      expect(isDeducible(without, puzzle.size), `clue ${i} was removable`).toBe(false);
+      expect(isDeducible(without, puzzle.size, puzzle.exclusions), `clue ${i} was removable`).toBe(
+        false,
+      );
     }
   });
 
@@ -118,11 +120,38 @@ describe("generatePuzzle", () => {
     expect(Math.max(...distances)).toBeLessThanOrEqual(3);
   });
 
+  it("only excludes candidates the solution does not use", () => {
+    for (const difficulty of DIFFICULTIES)
+      for (let seed = 0; seed < 6; seed++) {
+        const { exclusions, solution } = generatePuzzle({ seed, difficulty });
+        for (const { row, col, tile } of exclusions)
+          expect(solution[row][col], `${difficulty} seed ${seed}`).not.toBe(tile);
+      }
+  });
+
+  it("keeps only exclusions the puzzle needs", () => {
+    for (const difficulty of ["easy", "medium"] as const) {
+      const puzzle = generatePuzzle({ seed: 42, difficulty });
+      expect(puzzle.exclusions.length, difficulty).toBeGreaterThan(0);
+      for (let i = 0; i < puzzle.exclusions.length; i++) {
+        const without = puzzle.exclusions.filter((_, index) => index !== i);
+        expect(isDeducible(puzzle.clues, puzzle.size, without), `${difficulty} exclusion ${i}`).toBe(
+          false,
+        );
+      }
+    }
+  });
+
+  it("gives hard puzzles no exclusions", () => {
+    for (let seed = 0; seed < 6; seed++)
+      expect(generatePuzzle({ seed, difficulty: "hard" }).exclusions).toEqual([]);
+  });
+
   it("works on smaller grids", () => {
     for (const size of [4, 5]) {
       const puzzle = generatePuzzle({ seed: 5, size, clueRange: null });
       expect(puzzle.size).toBe(size);
-      expect(countSolutions(puzzle.clues, size, 2)).toBe(1);
+      expect(countSolutions(puzzle.clues, size, 2, puzzle.exclusions)).toBe(1);
       for (const clue of puzzle.clues) expect(clueHolds(clue, puzzle.solution)).toBe(true);
     }
   });

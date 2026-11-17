@@ -39,8 +39,9 @@ export function Legend() {
           guessed: every step can be worked out from the clues and what is already settled.
         </p>
         <p>
-          Each cell starts with all six candidates. Rule out the ones a clue forbids, and place a
-          symbol once you know it belongs there. Hint points at something you could work out next,
+          Each cell starts with all six candidates, except that on easy and medium a few are
+          already ruled out. Rule out the ones a clue forbids, and place a symbol once you know it
+          belongs there. Hint points at something you could work out next,
           and keeps count.
         </p>
       </Section>

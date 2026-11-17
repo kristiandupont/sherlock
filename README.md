@@ -7,12 +7,9 @@ symbols; every column contains exactly one symbol from each row. Clues say how
 the symbols relate across columns, and the grid is worked out from them alone.
 
 Unlike the original, the clues are not pinned to fixed slots. Every clue is a
-card on a freeform canvas: drag it anywhere, put a same-column clue next to the
-adjacency clue it interacts with, and right-click a card to grey it out once it
-has been used. Cards start grouped by kind and are never rearranged again — where
-they end up is the player's business.
+card on a freeform canvas that the player arranges as they like.
 
-The app lives in [`app/`](app):
+The app is in [`app/`](app):
 
 ```
 cd app
@@ -22,42 +19,48 @@ npm test         # solver, generator and board tests
 npm run build
 ```
 
-Every push to `main` builds the app and publishes it to GitHub Pages; see
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The workflow
-runs the lint and the tests first, so a failing test stops the deployment.
-
-Because a project page is served from `/sherlock/` rather than the domain root,
-`app/vite.config.ts` sets Vite's `base` for builds. That value has to match the
+Every push to `main` runs the lint and the tests and then publishes the build to
+GitHub Pages ([`deploy.yml`](.github/workflows/deploy.yml)). The site is served
+from `/sherlock/`, so Vite's `base` in `app/vite.config.ts` has to match the
 repository name.
+
+## Layout
+
+- `app/src/model/` — types, bit helpers, the solver and the generator. No React.
+- `app/src/game/` — the player's board, hints, the history used by Go back,
+  puzzle links, and the Alt highlight.
+- `app/src/ui/` — tile artwork, the board, the clue cards and canvas, confetti.
+- `app/src/App.tsx` — controls, undo history, and saving to `localStorage`. A
+  save stores the difficulty, the seed and every board of the history; the
+  puzzle is rebuilt from the seed.
 
 ## How a puzzle is generated
 
-Generation never searches for a clue set. It starts from a set that is known to
+Generation never searches for a clue set. It starts from one that is known to
 work and shrinks it, in `app/src/model/generate.ts`:
 
-1. Pick a random solution — an independent permutation of tiles per row.
-2. Enumerate every clue of every kind that is true for that solution. For a 6×6
-   grid that is roughly 2100 clues, which trivially determine the solution.
-3. Sample from that pool per kind (`DEFAULT_POOL_CAPS`), then remove clues one
-   at a time, keeping each removal only while the puzzle still solves. The
-   result is irreducible: no remaining clue can be dropped.
+1. Pick a random solution: an independent permutation of tiles per row.
+2. Enumerate every clue that is true for that solution (about 2100 on a 6×6
+   grid).
+3. Sample from that pool per kind (the difficulty's pool caps), then remove
+   clues one at a time, keeping each removal only while the puzzle still
+   solves. The result is irreducible: no remaining clue can be dropped.
 
-The test used in step 3 is `solveByDeduction` in `app/src/model/solver.ts`, which is
-pure constraint propagation with no guessing. Each tile holds a bitmask of the
-columns still open to it, and every clue kind is a rule that narrows those
-masks; the two structural rules of the grid are applied alongside them until
-nothing changes.
+The test in step 3 is `solveByDeduction` in `app/src/model/solver.ts`: pure
+constraint propagation, with no guessing. Each tile holds a bitmask of the
+columns still open to it, and each clue kind is a rule that narrows those masks,
+applied together with the two structural rules of the grid until nothing
+changes. Because the rules only remove placements that are impossible, a
+complete solve proves the solution is unique, and every puzzle can be solved by
+deduction alone. `countSolutions` checks this independently with backtracking,
+and the tests assert that the two agree.
 
-Using a guess-free solver as the acceptance test gives two properties at once.
-Every generated puzzle can be solved by deduction alone, and because the rules
-only ever eliminate genuinely impossible placements, a complete propagation
-solve proves the solution is unique. `countSolutions` implements backtracking
-search as an independent check of that claim, and the tests assert the two
-agree.
+A puzzle link (`#hard-6x6-1834562211`) names the generator's input, so it stays
+valid only as long as the generator builds the same puzzle from the same seed.
 
 ## The clues
 
-Nine kinds, all of them about which column a tile is in:
+Nine kinds, all about which column a tile is in:
 
 | kind | says |
 | --- | --- |
@@ -71,233 +74,107 @@ Nine kinds, all of them about which column a tile is in:
 | `between` | a tile is directly between two others, which may be either way round |
 | `next-to-either` | a tile neighbours one of a named pair, or both |
 
-The `apart` card draws the columns between the pair as empty cells rather than
-stating a number, which read as either the count of columns between them or the
-step from one to the other. Drawn, it is the `adjacent` card with those columns
-filled in, and the two say the same kind of thing. The gap is capped at three:
-on a six-column board a distance of five leaves only the two ends, a stronger
-statement than the card looks like it is making.
+The `apart` card draws the columns between the pair as empty cells, because a
+number could be read either as the count of columns between them or as the
+distance. The gap is capped at three.
 
-Adding a kind is a variant on the `Clue` union, a case in `applyClue`, an
-emitter in `allTrueClues`, a card, a description and a pool cap. The generator
-and the minimiser need nothing: they work on whatever `allTrueClues` produces.
-The property tests come along too, since they build their pool from the
-solution and assert that no rule ever contradicts it or eliminates a placement
-the solution uses.
-
-The exhaustive switches mean the compiler names most of the places to update.
-The two it cannot are the ones that iterate kinds rather than switch on them:
-`allTrueClues`, which would just never emit the new kind, and
-`layoutCluesByKind`, which held its own list of kinds and left the four new ones
-with no position at all — piled in the corner, unselectable, swallowing clicks
-meant for the cards beneath. That list is now derived from `CLUE_KINDS`, and a
-test gives the layout one clue of every kind and checks each gets a place.
+Adding a kind means a variant on the `Clue` union, a case in `applyClue`, an
+emitter in `allTrueClues`, a card, a description and a pool cap. The compiler
+reports most of the places through exhaustive switches; `allTrueClues` is the
+one it cannot, since a kind it never emits is simply absent. The generator, the
+minimiser and the property tests need no changes.
 
 ## Difficulty
 
-Minimisation lands on 20–25 clues whatever the settings, so difficulty comes
-from which kinds those clues are rather than how many there are. `same-column`
-clues are the easiest to act on and `between` clues force the longest chains of
-reasoning, so `DIFFICULTY_PRESETS` varies the pool caps and filters on the
-resulting clue count:
+Minimisation ends at roughly 20–25 clues whatever the settings, so difficulty
+comes from which kinds those clues are. `same-column` clues are the easiest to
+act on and `between` clues need the longest chains of reasoning.
+`DIFFICULTY_PRESETS` sets the pool caps, the accepted clue count and the number
+of exclusions offered:
 
-| preset | clues | `between` + `next-to-either` share |
-| ------ | ----- | --------------------------------- |
-| easy   | 23–28 | ~10%                              |
-| medium | 20–25 | ~19%                              |
-| hard   | 19–22 | ~52%                              |
+| preset | clues | exclusions | `between` + `next-to-either` share |
+| ------ | ----- | ---------- | --------------------------------- |
+| easy   | 21–26 | ~6 (1–11)  | ~11%                              |
+| medium | 19–24 | ~3 (1–6)   | ~19%                              |
+| hard   | 17–22 | none       | ~51%                              |
+
+An exclusion is a candidate ruled out on the grid before play starts. The
+generator draws `exclusionPool` wrong candidates, minimises the clues with all
+of them in place, and then drops every exclusion the clues can do without, so
+each one shown is needed. Removing information never lets propagation reach
+further, so the clues stay irreducible. About a third of the exclusions offered
+survive, and each replaces about half a clue. Hard draws none, and so builds
+the same puzzles it did before exclusions existed.
 
 ## The tiles
 
-Six rows: letters, dice, shapes, symbols, things and travel.
+Six rows: letters, dice, shapes, symbols, things and travel. All thirty-six
+names are distinct, because a player works through a clue by saying it to
+themselves ("A is next to three"), and a name has to identify its tile without a
+qualifier. An earlier set had digits, roman numerals and dice, so "three" named
+three tiles. `app/src/ui/tileSets.test.ts` enforces the rule.
 
-The naming matters more than the drawing. A player works a clue out by saying it
-to themselves — "A is next to three" — so a tile needs a name that identifies it
-on its own. An earlier set had digits, roman numerals *and* dice: three rows
-denoting the same six things, so "three" no longer picked out a tile and every
-thought about one needed a qualifier. Colour cannot repair that, because nobody
-thinks in colour, and colour was what carried the distinction. The roman
-numerals were the weakest set on their own terms too — at 18px, IV and VI differ
-only in the order of two strokes, and II and III only in width.
-
-So there is one numeric row now, and the rule is that all thirty-six names are
-distinct. `app/src/ui/tileSets.test.ts` enforces it, and names the reason.
-
-Within a row the glyph tells tiles apart; across rows the hue does. Those two
-channels stay separate, which is why each row is drawn in a single colour. It
-also means colour is now only ever a secondary cue: every row differs in kind as
-well as in hue, which was not true when three rows were all numbers.
-
-Glyphs are drawn to survive being 18px of solid silhouette in a board cell: bold
-outlines, no interior detail. All of it is a lookup table over `{row, tile}`
-indices that the model never looks inside, so swapping in other sets is a data
-change with no logic behind it.
+Within a row the glyph tells tiles apart, and across rows the hue does, so each
+row is drawn in a single colour. Colour is only ever a secondary cue. Glyphs are
+bold silhouettes without interior detail, so they stay legible at 18px.
 
 ## The clue canvas
 
-Cards are dragged one at a time, or several together. Dragging across empty
-canvas draws a band and selects whatever it crosses; dragging a card that is
-part of that selection carries the whole group, and dragging any other card
-carries only itself and drops the selection, so what moves is always what was
-picked up. Shift-click adds or removes one card, shift-drag adds a band to the
-selection, and Escape clears it.
+- **Moving:** drag a card, or drag across empty canvas to select several and
+  drag any of them to move the group. Shift-click adds or removes one card, and
+  Escape clears the selection. Scrolling and middle-drag pan; ⌘/Ctrl-scroll and
+  the buttons zoom.
+- **Turning:** clicking a card whose meaning does not depend on direction
+  mirrors it, so that the shared symbol of two clues can be placed side by side.
+  `flipAxis` says which way each kind turns, if at all. Cards start turned at
+  random, seeded from the puzzle, so that the drawing order says nothing about
+  the solution.
+- **Greying out:** right-click a card once it has been used.
+- **Alt highlight:** holding Alt (Option on a Mac) while pointing at a symbol,
+  on the grid or on a card, rings every card that mentions it. It is not counted
+  as a hint.
 
-Clicking a card already turns it round, and right-clicking greys it out; both
-are worth more than click-to-select, so selection is the band and shift-click
-instead. That leaves
-dragging empty canvas doing selection rather than panning, so panning is the
-scroll it always was, with middle-drag as well.
-
-Zoom is a `scale` transform on the cards, inside a wrapper sized to the scaled
-extent. Keeping that wrapper the real size means the browser's own scrolling
-still pans, at any zoom, with no scroll handling of ours. What it costs is that
-every pointer measurement has to be converted: screen coordinates become canvas
-coordinates through the surface's scroll offset and the zoom, and a drag moves a
-card by the pointer distance divided by the zoom. Zooming holds one point still
-— the pointer for ⌘/Ctrl-scroll, the centre for the buttons — by working out
-where that point sits on the canvas and setting the scroll so it lands back
-under the cursor, in a layout effect after the new zoom has been laid out.
-
-A card whose meaning does not depend on direction can be turned round with a
-click, which mirrors it without changing what it says: the pair on an
-`adjacent` card may stand either way, so either drawing is true. Putting the
-shared symbol of two clues side by side is what makes it worth doing, because a
-chain of clues is followed with the eye. `flipAxis` says which way each kind
-turns — `same-column` and `different-column` are stacks and turn top to bottom,
-the four symmetric row cards turn left to right, and `left-of`,
-`immediately-left-of` and `at-an-end` do not turn at all, so clicking one does
-nothing. Clicking used to grey a card out as well as right-clicking; right-click
-alone does that now.
-
-Cards also start turned at random, seeded from the puzzle's seed. Without it a
-`next-to-either` card always drew its single tile on the left, and every pair
-card put the earlier row first, so a row of one kind read as a single shape.
-Neither regularity said anything about the solution; the one build order that
-would have, the `between` clue's, is already masked in the generator by
-`maskBetweenOrder`.
-
-A turn is a change to the canvas rather than a move, so like a card's position
-it stays off the undo history and is saved beside the positions. The clue itself
-is never rewritten, so the solver, the generator and the hints cannot tell the
-difference — only `describeClue` is told, so the tooltip names a pair in the
-order the card draws it.
-
-The geometry is in `app/src/ui/clueLayout.ts` rather than in the component:
-which cards a band caught, the rectangle a drag spans, how far to zoom to fit.
-That part is worth testing on its own, and none of it needs a browser.
+Positions and turns are tidying rather than moves, so they are saved but are not
+part of the undo history. The geometry (band selection, drag bounds, zoom to
+fit) is in `app/src/ui/clueLayout.ts` and is tested without a browser.
 
 ## Hints
 
-A hint points at something the player could work out next, and says nothing
-about what it yields. It rings its target for four and a half seconds and then
-fades out on its own, so a hint already taken in does not sit on the screen for
-the rest of the game. Pressing Hint again moves to the next one.
-
-Candidates are ordered by how obvious they are, in `app/src/game/hint.ts`:
+A hint rings something the player could work out next, without saying what it
+yields, and the ring fades after four and a half seconds. Pressing Hint again
+moves to the next one. `app/src/game/hint.ts` orders them:
 
 1. A cell with one symbol left in it.
-2. A cell that is the last place in its row where some symbol can go.
-3. The clues that still narrow the grid.
+2. A cell that is the last place in its row for some symbol.
+3. The clues that still narrow the grid, preferring ones that settle a cell, and
+   leaving greyed-out cards until last.
 
-The first two need no clue at all, which is why they come first. Both ring the
-cell without naming a symbol — for the second, working out which symbol has run
-out of homes is left to the player.
-
-Clue hints are measured against a baseline of the grid with all its mechanical
-consequences worked through. The board leaves placements to the player, so the
-grid can be behind on those, and a clue must not be credited with bookkeeping
-they simply have not done yet. Ranking then prefers clues that settle a cell
-outright over ones that only narrow candidates, and leaves clues the player has
-greyed out until last. `findClueHints` calls the same `applyClue` the solver
-uses, so a hint cannot disagree with the solver about what a clue means. The
-tests solve every generated puzzle by following nothing but its own hints,
-claiming cells and working clues through exactly as a player would.
-
-There is no button that checks the grid against the answer. A hint being offered
-is no promise that the grid so far is correct — a wrong elimination in one row
-leaves the other rows still saying plenty — so the wrong-turn notice below is
-what reports a mistake. On a grid that has already gone wrong there is nothing
-left to work out, so asking for a hint brings that notice up at once instead of
-ringing anything. The player asked for it, so nothing is given away about when
-the mistake was made.
+Clue hints are measured against the grid with its mechanical consequences
+already applied, so a clue is not credited with bookkeeping the player has not
+done. They use the same `applyClue` as the solver. The tests solve every
+generated puzzle by following nothing but its own hints.
 
 ## Going back after a wrong move
 
-The player's moves only ever remove candidates, so once a symbol that belongs
-somewhere has been ruled out, every later board in the history has that mistake
-too. The history is therefore a run of correct boards followed by a run of
-broken ones, and `app/src/game/history.ts` finds the boundary. Going back is a
-truncation of the history array, which leaves undo working on what remains.
+Moves only ever remove candidates, so once a correct symbol has been ruled out,
+every later board in the history has that mistake too. `app/src/game/history.ts`
+finds the first broken board, and Go back truncates the history to the board
+before it.
 
-A wrong move is not reported when it happens — that would amount to a hint on
-every move. The notice instead stays completely hidden for 20 seconds after the
-grid goes wrong, then fades in over five. An earlier version began the fade at
-once and relied on it being too faint to see at first, but any opacity above
-zero shows against the page, so a player could tell the moment they went wrong.
-So the player learns that something is wrong without learning which move
-did it, and without spending twenty minutes on a grid that cannot be solved.
-
-The wait is measured in time rather than in moves. Waiting for a few further
-moves also hides the moment of the mistake, but a player who has gone wrong is
-often the one who then sits and stares at the grid, and moves that never come
-would leave exactly the wrong person unattended. A later move neither restarts
-the wait nor hurries it.
-
-Two things cut the wait short, and both are cases where there is nothing left to
-protect the player from. Asking for a hint on a broken grid brings the notice up
-instead of ringing anything, since nothing can be worked out. And a grid that is
-full but wrong cannot be worked on at all, so the notice appears the moment the
-last cell is filled in. Both show it outright rather than shortening the fade:
-once a CSS transition is running, changing its duration does not disturb it,
-because opacity is already headed for the same value.
-
-The notice element is always in the document; only its opacity and visibility
-change. Mounting it on the wrong move resized the left column and moved the clue
-canvas, which announced the notice a beat before its text was readable. The
-column also carries a fixed width, so no message can stretch it.
-
-The way back is offered only inside that notice, or alongside a Check the player
-asked for. A permanently visible "go back" button would be an instant mistake
-detector and would defeat the delay.
+A wrong move is not reported when it is made, because that would be a hint on
+every move. The notice stays hidden for 20 seconds after the grid goes wrong and
+then fades in over five, so the player learns that something is wrong without
+learning which move it was. The wait is measured in time rather than moves,
+since a player who has gone wrong often stops making moves. Asking for a hint on
+a broken grid, or filling the last cell of a wrong grid, shows the notice at
+once. Go back is only offered inside the notice; a button that was always
+visible would report mistakes immediately.
 
 ## Finishing
 
-A correct grid gets confetti, thrown in the six tile colours from cannons at the
-foot of the screen, over `app/src/ui/Confetti.tsx`. How much depends on the hints
-used, Go back included (`app/src/ui/celebration.ts`): a solve without hints fires
-four volleys from both corners and two from the centre, one hint fires the three
-corner volleys 0.6 seconds apart, and each further hint fires fewer, down to one
-small volley from the centre of the bottom edge, which every solve still gets.
-The cannons sit just inside the bottom edge, so the pieces are seen leaving the
-cannon, and the volleys run together into one burst.
-
-Launch speeds and gravity are scaled to the window's height, so the fastest piece
-stops just short of the top edge on any screen. Each frame computes every
-piece's position from the time since it was fired, using the exact solution for
-gravity with drag, so the confetti moves at the display's full frame rate and
-follows the same path and timing at 60 Hz or 120 Hz.
-If the window is resized or moved to a screen with another pixel ratio during the
-run, the canvas is resized and the pieces are mapped onto the new size.
-
-It is a plain canvas and a few dozen lines of physics rather than a dependency,
-it clears itself away after five and a half seconds, and it leaves the banner
-behind so the result is still there afterwards. Anyone whose system asks for
-reduced motion gets the banner alone. Reopening a puzzle that was already
-finished does not celebrate it a second time.
-
-## Layout
-
-- `app/src/model/` — types, bit helpers, the solver, and the generator. No React.
-- `app/src/game/board.ts` — the player's grid state. A placement takes its
-  symbol out of the rest of its row and stops there: the board never reasons
-  from clues, and never claims a cell on the player's behalf.
-- `app/src/game/hint.ts` — ranks what the player could work out next: cells
-  first, then clues.
-- `app/src/game/history.ts` — finds the move that broke the grid, and rewinds to
-  just before it.
-- `app/src/ui/` — tile artwork, the board, the clue cards, the canvas, and the
-  confetti.
-- `app/src/App.tsx` — controls, undo history, and saving to `localStorage`. A saved
-  game stores the seed, the difficulty and every board of the history; the
-  puzzle itself is reproducible from the first two, and the history is what
-  keeps undo and the rewind working across a reload.
+A correct grid gets confetti in the six tile colours (`app/src/ui/Confetti.tsx`).
+The fewer hints used, Go back included, the more volleys are fired
+(`app/src/ui/celebration.ts`). Positions are computed from the time since each
+piece was fired, so the result is the same at any frame rate. It is a canvas
+with no dependency, it is skipped when the system asks for reduced motion, and a
+puzzle that was already finished is not celebrated again when it is reopened.

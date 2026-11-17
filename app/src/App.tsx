@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  emptyBoard,
   isComplete,
   isSolved,
   placeTile,
   removeCandidate,
+  startingBoard,
   type BoardState,
 } from "./game/board";
 import { findHints, type Hint } from "./game/hint";
 import { firstBrokenIndex, rewindToLastGood, type Snapshot } from "./game/history";
+import { LEGACY_STORAGE_KEY } from "./game/legacySave";
 import { cluesMentioning } from "./game/peek";
 import { DIFFICULTIES, parsePuzzleHash, puzzleHash, type PuzzleLink } from "./game/link";
 import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
@@ -20,7 +21,7 @@ import { HelpDialog } from "./ui/HelpDialog";
 import { flipsForPuzzle, layoutCluesByKind, type Point } from "./ui/clueLayout";
 import { usePeek } from "./ui/usePeek";
 
-const STORAGE_KEY = "sherlock:game:v4";
+const STORAGE_KEY = "sherlock:game:v5";
 
 /**
  * A wrong move is not reported straight away — that would amount to a hint on
@@ -76,7 +77,7 @@ type Saved = {
 };
 
 const startSnapshot = (puzzle: Puzzle): Snapshot => ({
-  board: emptyBoard(puzzle.size),
+  board: startingBoard(puzzle.size, puzzle.exclusions),
   used: puzzle.clues.map(() => false),
 });
 
@@ -129,10 +130,13 @@ function initialGame(): Game {
 /** A puzzle is fully determined by its seed and difficulty, so only those are stored. */
 function loadGame(): Game | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const current = localStorage.getItem(STORAGE_KEY);
+    const legacy = current ? null : localStorage.getItem(LEGACY_STORAGE_KEY);
+    const raw = current ?? legacy;
     if (!raw) return null;
     const saved = JSON.parse(raw) as Saved;
     if (!DIFFICULTIES.includes(saved.difficulty)) return null;
+    if (legacy && saved.difficulty !== "hard") return null;
     const puzzle = puzzleFromLink(saved);
     if (!Array.isArray(saved.history) || saved.history.length === 0) return null;
     if (saved.history.some((state) => !state?.cells || !state?.placed)) return null;
@@ -265,6 +269,10 @@ export default function App() {
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      // Removed here rather than when it is read: the read happens in a state
+      // initialiser, which React may call twice, and the second call would
+      // find the save already gone.
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch {
       // A full or blocked store just means the game is not resumable.
     }

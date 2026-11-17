@@ -178,7 +178,7 @@ describe("countSolutions", () => {
   it("agrees with deduction that a generated puzzle has one solution", () => {
     for (let seed = 0; seed < 8; seed++) {
       const puzzle = generatePuzzle({ seed, size: SIZE });
-      expect(countSolutions(puzzle.clues, SIZE, 2)).toBe(1);
+      expect(countSolutions(puzzle.clues, SIZE, 2, puzzle.exclusions)).toBe(1);
     }
   });
 
