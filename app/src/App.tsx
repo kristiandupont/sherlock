@@ -7,7 +7,7 @@ import {
   startingBoard,
   type BoardState,
 } from "./game/board";
-import { findHints, type Hint } from "./game/hint";
+import { findFalseCardHints, findHints, type Hint } from "./game/hint";
 import { firstBrokenIndex, rewindToLastGood, type Snapshot } from "./game/history";
 import { LEGACY_STORAGE_KEY } from "./game/legacySave";
 import { cluesMentioning } from "./game/peek";
@@ -23,7 +23,13 @@ import {
   type Suspects,
 } from "./game/suspects";
 import { DIFFICULTIES, parsePuzzleHash, puzzleHash, type PuzzleLink } from "./game/link";
-import { generatePuzzle, puzzleStats, type Difficulty } from "./model/generate";
+import { smallestConflict } from "./model/falseCard";
+import {
+  DIFFICULTY_PRESETS,
+  generatePuzzle,
+  puzzleStats,
+  type Difficulty,
+} from "./model/generate";
 import type { Puzzle } from "./model/types";
 import { Board } from "./ui/Board";
 import { ClueCanvas } from "./ui/ClueCanvas";
@@ -49,6 +55,9 @@ const STORAGE_KEY = "sherlock:game:v5";
 const REWIND_HINT = "Return to the last position that had no mistakes";
 const NOTICE_DELAY_MS = 20_000;
 const NOTICE_FADE_SECONDS = 5;
+
+/** A stable empty list, so the canvas does not see a new highlight on every render. */
+const NO_CARDS: readonly number[] = [];
 
 /** How long a hint's ring stays before it fades out; matches the CSS animation. */
 const HINT_VISIBLE_MS = 4500;
@@ -219,6 +228,19 @@ export default function App() {
     [game.history, game.puzzle],
   );
   const wrongAccusation = isWrongAccusation(game.suspects, game.puzzle.falseClue);
+  // The cards of the smallest contradicting group, which Hint holds back until
+  // the false card has been accused. The generator kept it within the
+  // difficulty's limit, so searching up to that size finds it.
+  const { puzzle, difficulty } = game;
+  const conflictGroup = useMemo(() => {
+    if (puzzle.falseClue === null) return [];
+    const limit = DIFFICULTY_PRESETS[difficulty].falseGroup;
+    return (
+      smallestConflict(puzzle.clues, puzzle.falseClue, puzzle.size, puzzle.exclusions, limit) ?? [
+        puzzle.falseClue,
+      ]
+    );
+  }, [puzzle, difficulty]);
   // Accusing a true card is a mistake in the same way as ruling out a symbol
   // that belongs, so it brings up the same notice, after the same wait.
   const warnWrongTurn = brokenIndex >= 0 || wrongAccusation;
@@ -397,7 +419,18 @@ export default function App() {
       revealNotice();
       return;
     }
-    const hints = findHints(board, game.puzzle.clues, used, game.puzzle.falseClue);
+    const { clues, falseClue } = game.puzzle;
+    const hints =
+      falseClue === null
+        ? findHints(board, clues, used)
+        : findFalseCardHints(
+            board,
+            clues,
+            used,
+            falseClue,
+            conflictGroup,
+            game.suspects.accused === falseClue,
+          );
     // Nothing to show, as on a solved grid, so nothing to count.
     if (hints.length === 0) return;
     countHint();
@@ -591,7 +624,13 @@ export default function App() {
             onSuspect={suspectClues}
             onClearSuspect={clearSuspectClue}
             onAccuse={accuseClue}
-            highlight={hint?.kind === "clue" ? hint.clueIndex : null}
+            highlight={
+              hint?.kind === "clue"
+                ? [hint.clueIndex]
+                : hint?.kind === "group"
+                  ? hint.clueIndices
+                  : NO_CARDS
+            }
             revealedFalse={solved ? game.puzzle.falseClue : null}
             peeked={peeked}
             onHoverTile={hoverTile}

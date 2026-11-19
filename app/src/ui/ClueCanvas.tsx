@@ -27,7 +27,7 @@ type Props = {
   /** Mirrors every card in the list, which clicking a card asks for. */
   onFlip: (indices: number[]) => void;
   /** Index of the clue the hint points at, ringed and scrolled into view. */
-  highlight: number | null;
+  highlight: readonly number[];
   /** Index of the false card, once the puzzle is solved and it can be shown. */
   revealedFalse: number | null;
   /** The suspects strip, or null when the puzzle has no false card and so no strip. */
@@ -201,9 +201,9 @@ export function ClueCanvas({
   }, [selection]);
 
   useEffect(() => {
-    if (highlight === null) return;
+    if (highlight.length === 0) return;
     rootRef.current
-      ?.querySelector(`[data-clue-index="${highlight}"]`)
+      ?.querySelector(`[data-clue-index="${highlight[0]}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
   }, [highlight]);
 
@@ -466,7 +466,7 @@ export function ClueCanvas({
 
   /** Ring and outline for a card, the same on the canvas and in the strip. */
   const frame = (index: number) => {
-    const hinted = highlight === index;
+    const hinted = highlight.includes(index);
     return {
       ring: hinted ? "hint-ring rounded-lg" : peeked.has(index) ? "peek-ring rounded-lg" : "",
       outline:
@@ -541,7 +541,7 @@ export function ClueCanvas({
                 if (suspectSet.has(index)) return null;
                 const point = positionOf(index);
                 const dragging = cardDrag?.origins.has(index) && cardDrag.moved;
-                const hinted = highlight === index;
+                const hinted = highlight.includes(index);
                 const selected = selection.has(index);
                 return (
                   <div
@@ -649,7 +649,7 @@ export function ClueCanvas({
                   <ClueCard
                     clue={clue}
                     size={size}
-                    used={(used[index] ?? false) && highlight !== index}
+                    used={(used[index] ?? false) && !highlight.includes(index)}
                     flipped={flipped[index] ?? false}
                   />
                   {overlays(index)}

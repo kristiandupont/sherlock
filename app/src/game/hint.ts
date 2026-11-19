@@ -25,7 +25,16 @@ export type ClueHint = {
   eliminations: number;
 };
 
-export type Hint = CellHint | ClueHint;
+/**
+ * Several cards ringed together in a false-card puzzle: the false card is one
+ * of them, and nothing else is left to work out until the player decides which.
+ */
+export type GroupHint = {
+  kind: "group";
+  clueIndices: number[];
+};
+
+export type Hint = CellHint | ClueHint | GroupHint;
 
 /**
  * Cells that can be settled from the grid alone, most obvious first: a cell
@@ -90,15 +99,14 @@ export function findClueHints(
   board: BoardState,
   clues: Clue[],
   used: boolean[] = [],
-  falseClue: number | null = null,
+  withheld: readonly number[] = [],
 ): ClueHint[] {
   const baseline = settled(board);
   if (!baseline) return [];
 
   const hints: ClueHint[] = [];
   clues.forEach((clue, clueIndex) => {
-    // The false card would narrow the grid wrongly, so it is never offered.
-    if (clueIndex === falseClue) return;
+    if (withheld.includes(clueIndex)) return;
     const after = Int32Array.from(baseline);
     if (!propagate(after, [clue], board.size).ok) return;
 
@@ -129,16 +137,43 @@ export function findHints(
   board: BoardState,
   clues: Clue[],
   used: boolean[] = [],
-  falseClue: number | null = null,
+  withheld: readonly number[] = [],
 ): Hint[] {
-  return [...findCellHints(board), ...findClueHints(board, clues, used, falseClue)];
+  return [...findCellHints(board), ...findClueHints(board, clues, used, withheld)];
 }
 
 export function findHint(
   board: BoardState,
   clues: Clue[],
   used: boolean[] = [],
-  falseClue: number | null = null,
+  withheld: readonly number[] = [],
 ): Hint | null {
-  return findHints(board, clues, used, falseClue)[0] ?? null;
+  return findHints(board, clues, used, withheld)[0] ?? null;
+}
+
+/**
+ * Hints for a false-card puzzle, where which card is false is part of what the
+ * player works out. A hint never points at the false card, but pointing at any
+ * other card of the conflicting `group` would say the same thing: with two
+ * suspects left, ringing one names the other. So until the false card has been
+ * accused, the whole group is held back, and when nothing else is left to work
+ * out the hint rings the group together instead, which says only that the false
+ * card is among them.
+ */
+export function findFalseCardHints(
+  board: BoardState,
+  clues: Clue[],
+  used: boolean[],
+  falseClue: number,
+  group: readonly number[],
+  accusedRightly: boolean,
+): Hint[] {
+  if (accusedRightly) return findHints(board, clues, used, [falseClue]);
+  const hints = findHints(board, clues, used, group);
+  if (hints.length > 0) return hints;
+  const fromGroup = findClueHints(board, clues, used, [falseClue]);
+  // Sorted, since the group is found starting from the false card and would
+  // otherwise always name it first.
+  const clueIndices = [...group].sort((a, b) => a - b);
+  return fromGroup.length > 0 ? [{ kind: "group", clueIndices }] : [];
 }

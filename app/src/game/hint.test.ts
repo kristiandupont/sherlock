@@ -16,7 +16,15 @@ import {
   startingBoard,
   type BoardState,
 } from "./board";
-import { findCellHints, findClueHints, findHint, findHints, type Hint } from "./hint";
+import { smallestConflict } from "../model/falseCard";
+import {
+  findCellHints,
+  findClueHints,
+  findFalseCardHints,
+  findHint,
+  findHints,
+  type Hint,
+} from "./hint";
 
 /** The eliminations a clue yields, without placing anything for the player. */
 function applyClue(board: BoardState, clue: Clue): BoardState {
@@ -25,11 +33,17 @@ function applyClue(board: BoardState, clue: Clue): BoardState {
   return { size: board.size, cells: positionsToBoard(pos, board.size).cells, placed: board.placed };
 }
 
-/** Acts on a hint the way a player would: claim the cell, or work the clue through. */
+/**
+ * Acts on a hint the way a player would: claim the cell, or work the clue
+ * through. A group hint changes nothing on the grid; the player's answer to it
+ * is an accusation.
+ */
 const act = (board: BoardState, hint: Hint, clues: Clue[]): BoardState =>
   hint.kind === "cell"
     ? placeTile(board, hint.row, hint.col, hint.tile)
-    : applyClue(board, clues[hint.clueIndex]);
+    : hint.kind === "clue"
+      ? applyClue(board, clues[hint.clueIndex])
+      : board;
 
 const totalCandidates = (board: BoardState): number =>
   board.cells.reduce((sum, row) => sum + row.reduce((n, mask) => n + popCount(mask), 0), 0);
@@ -126,20 +140,60 @@ describe("findHints", () => {
     }
   });
 
-  it("solves a false-card puzzle by its hints, never pointing at the false card", () => {
-    for (const difficulty of ["easy", "hard"] as const) {
+  it("solves a false-card puzzle by its hints, never singling out a card of the group", () => {
+    for (const difficulty of ["easy", "medium", "hard"] as const) {
       const puzzle = generatePuzzle({ seed: 3, difficulty, falseCard: true });
+      const falseClue = puzzle.falseClue!;
+      const group = smallestConflict(puzzle.clues, falseClue, puzzle.size, puzzle.exclusions, 4)!;
       let board = startingBoard(puzzle.size, puzzle.exclusions);
+      let accused = false;
       let steps = 0;
       while (!isComplete(board)) {
-        const hint = findHint(board, puzzle.clues, [], puzzle.falseClue);
+        const hint =
+          findFalseCardHints(board, puzzle.clues, [], falseClue, group, accused)[0] ?? null;
         expect(hint, `${difficulty} stalled after ${steps} hints`).not.toBeNull();
-        if (hint!.kind === "clue") expect(hint!.clueIndex).not.toBe(puzzle.falseClue);
+        if (hint!.kind === "clue") {
+          expect(hint!.clueIndex).not.toBe(falseClue);
+          if (!accused) expect(group).not.toContain(hint!.clueIndex);
+        }
+        // A player shown the group works out which card is false and accuses it.
+        if (hint!.kind === "group") accused = true;
         board = act(board, hint!, puzzle.clues);
         expect(++steps).toBeLessThan(500);
       }
       expect(isSolved(board, puzzle.solution), difficulty).toBe(true);
     }
+  });
+
+  it("rings the group, not the card that would give the false one away", () => {
+    // The position in a game that was played: every cell settled except that
+    // B and F are left in the first two columns. The only card that still says
+    // anything is the true one of the two suspects.
+    const puzzle = generatePuzzle({
+      seed: 1388013551,
+      difficulty: "medium",
+      falseCard: true,
+      clueRange: null,
+    });
+    const falseClue = puzzle.falseClue!;
+    const group = smallestConflict(puzzle.clues, falseClue, puzzle.size, puzzle.exclusions, 4)!;
+    const solved = boardFromSolution(puzzle.solution);
+    const b = puzzle.solution[0].indexOf(1);
+    const f = puzzle.solution[0].indexOf(5);
+    const cells = solved.cells.map((row) => row.slice());
+    const placed = solved.placed.map((row) => row.slice());
+    for (const col of [b, f]) {
+      cells[0][col] = (1 << 1) | (1 << 5);
+      placed[0][col] = false;
+    }
+    const board = { size: puzzle.size, cells, placed };
+
+    const before = findFalseCardHints(board, puzzle.clues, [], falseClue, group, false);
+    expect(before).toEqual([{ kind: "group", clueIndices: [...group].sort((x, y) => x - y) }]);
+
+    const after = findFalseCardHints(board, puzzle.clues, [], falseClue, group, true);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((hint) => hint.kind === "clue" && group.includes(hint.clueIndex))).toBe(true);
   });
 
   it("has nothing to offer on a finished board", () => {

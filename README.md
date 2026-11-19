@@ -139,8 +139,11 @@ card positions (`app/src/game/suspects.ts`).
 
 The solver treats the false card as saying nothing. A player who reads "false"
 as "its opposite is true" knows more than that, so nothing the solver relies on
-is out of their reach. Hints never point at the false card, and it is marked
-once the grid is solved. These puzzles have about 24 cards whatever the
+is out of their reach. Until the false card has been accused, hints leave out
+every card of the smallest contradicting group, since with two suspects left,
+pointing at one names the other; when only those cards are left to work with,
+the hint rings the group together (`findFalseCardHints`). The false card is
+marked once the grid is solved. These puzzles have about 24 cards whatever the
 difficulty, so the clue-count range is not applied, and generation takes about
 0.2–0.4 s, compared with a few milliseconds for a normal puzzle.
 
