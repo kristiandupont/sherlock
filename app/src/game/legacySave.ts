@@ -5,8 +5,8 @@
  * over.
  *
  * Temporary. `legacySave.test.ts` starts failing on `REMOVE_AFTER`, which
- * stops deployment until this file, its test and the two uses in `App.tsx`
- * are deleted. Anyone who has not opened the game by then loses a saved hard
+ * stops deployment until this file, its test and the uses of
+ * `LEGACY_STORAGE_KEY` in `session/save.ts` (and their tests) are deleted. Anyone who has not opened the game by then loses a saved hard
  * game in progress, and nothing else.
  */
 export const LEGACY_STORAGE_KEY = "sherlock:game:v4";

@@ -30,9 +30,12 @@ repository name.
 - `app/src/game/` — the player's board, hints, the history used by Go back,
   puzzle links, and the Alt highlight.
 - `app/src/ui/` — tile artwork, the board, the clue cards and canvas, confetti.
-- `app/src/App.tsx` — controls, undo history, and saving to `localStorage`. A
-  save stores the difficulty, the seed and every board of the history; the
-  puzzle is rebuilt from the seed.
+- `app/src/session/` — one game in progress (puzzle, undo history, card
+  arrangement) and the pure functions that change it, plus saving it to
+  `localStorage`. A save stores the difficulty, the seed and every board of the
+  history; the puzzle is rebuilt from the seed. No React.
+- `app/src/App.tsx` — holds the current game in React state, the hint and
+  timers, and lays out the page.
 
 ## How a puzzle is generated
 

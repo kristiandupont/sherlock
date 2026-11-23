@@ -1,60 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  isComplete,
-  isSolved,
-  placeTile,
-  removeCandidate,
-  startingBoard,
-  type BoardState,
-} from "./game/board";
-import { findFalseCardHints, findHints, type Hint } from "./game/hint";
-import { firstBrokenIndex, rewindToLastGood, type Snapshot } from "./game/history";
-import { LEGACY_STORAGE_KEY } from "./game/legacySave";
+import { isComplete, isSolved, placeTile, removeCandidate, type BoardState } from "./game/board";
+import type { Hint } from "./game/hint";
+import { firstBrokenIndex } from "./game/history";
+import { parsePuzzleHash, puzzleHash } from "./game/link";
 import { cluesMentioning } from "./game/peek";
+import { isWrongAccusation, verdict } from "./game/suspects";
+import { puzzleStats, type Difficulty } from "./model/generate";
 import {
-  accuse,
-  addSuspects,
-  clearSuspect,
-  isWrongAccusation,
-  noSuspects,
-  restoreSuspects,
-  verdict,
-  withdrawWrongAccusation,
-  type Suspects,
-} from "./game/suspects";
-import { DIFFICULTIES, parsePuzzleHash, puzzleHash, type PuzzleLink } from "./game/link";
-import { smallestConflict } from "./model/falseCard";
-import {
-  DIFFICULTY_PRESETS,
-  generatePuzzle,
-  puzzleStats,
-  type Difficulty,
-} from "./model/generate";
-import type { Puzzle } from "./model/types";
+  accuseCard,
+  conflictGroup,
+  countHint,
+  currentSnapshot,
+  flipCards,
+  hintsFor,
+  linkOf,
+  moveCards,
+  pushBoard,
+  resumeOrStart,
+  rewind,
+  sameLink,
+  startGame,
+  startLinkedGame,
+  suspectCards,
+  toggleUsed,
+  undo,
+  unsuspectCard,
+  withLayout,
+  type Game,
+} from "./session/game";
+import { loadGame, storeGame } from "./session/save";
 import { Board } from "./ui/Board";
 import { ClueCanvas } from "./ui/ClueCanvas";
 import { Confetti } from "./ui/Confetti";
 import { HelpDialog } from "./ui/HelpDialog";
-import { flipsForPuzzle, layoutCluesByKind, type Point } from "./ui/clueLayout";
+import { Toolbar } from "./ui/Toolbar";
+import { WrongTurnNotice } from "./ui/WrongTurnNotice";
+import type { Point } from "./ui/clueLayout";
 import { usePeek } from "./ui/usePeek";
-
-const STORAGE_KEY = "sherlock:game:v5";
-
-/**
- * A wrong move is not reported straight away — that would amount to a hint on
- * every move. The notice stays completely hidden for `NOTICE_DELAY_MS` after
- * the grid goes wrong, then fades in over `NOTICE_FADE_SECONDS`. An earlier
- * version started the fade at once and relied on it being too faint to notice
- * at first, but any opacity above zero is visible against the page, so the
- * player could tell the moment they had gone wrong.
- *
- * The wait is measured in time rather than in moves, because a player who has
- * gone wrong is often the one who then sits and stares: waiting for moves that
- * never come would leave exactly the wrong person unattended.
- */
-const REWIND_HINT = "Return to the last position that had no mistakes";
-const NOTICE_DELAY_MS = 20_000;
-const NOTICE_FADE_SECONDS = 5;
+import { useWrongTurnNotice } from "./ui/useWrongTurnNotice";
 
 /** A stable empty list, so the canvas does not see a new highlight on every render. */
 const NO_CARDS: readonly number[] = [];
@@ -62,221 +45,50 @@ const NO_CARDS: readonly number[] = [];
 /** How long a hint's ring stays before it fades out; matches the CSS animation. */
 const HINT_VISIBLE_MS = 4500;
 
-type Game = {
-  difficulty: Difficulty;
-  puzzle: Puzzle;
-  /**
-   * Snapshots oldest to newest; the last one is what the player sees. Where the
-   * cards lie is not part of a snapshot: arranging the canvas is not a move, and
-   * undo moving cards the player had just tidied up would be a nuisance.
-   */
-  history: Snapshot[];
-  positions: Point[];
-  /**
-   * Which cards are drawn mirrored. Like `positions`, and for the same reason,
-   * this is not part of a snapshot: turning a card round is tidying the canvas
-   * rather than a move, so undo leaves it alone.
-   */
-  flipped: boolean[];
-  /**
-   * Presses of Hint and Go back. Kept off the history, so undoing a move does
-   * not take back the help that came before it.
-   */
-  hintsUsed: number;
-  /** The suspects strip of a false-card puzzle. Off the history, like `positions`. */
-  suspects: Suspects;
-};
-
-type Saved = {
-  difficulty: Difficulty;
-  /** Absent in saves written before false-card puzzles existed. */
-  falseCard?: boolean;
-  seed: number;
-  size: number;
-  /** Every snapshot of the history, oldest first, so undo and rewind survive a reload. */
-  history: Array<{ cells: number[][]; placed: boolean[][]; used: boolean[] }>;
-  positions: Point[];
-  flipped?: boolean[];
-  hintsUsed?: number;
-  suspects?: Suspects;
-};
-
-const startSnapshot = (puzzle: Puzzle): Snapshot => ({
-  board: startingBoard(puzzle.size, puzzle.exclusions),
-  used: puzzle.clues.map(() => false),
-});
-
-/**
- * Builds the puzzle a seed produced. A seed returned by `generatePuzzle` is the
- * one its retries settled on, so building from it once, with no clue range to
- * retry for, gives the same puzzle back. Retrying could move past it, when the
- * puzzle was only the closest miss.
- */
-const puzzleFromLink = ({ difficulty, falseCard, size, seed }: PuzzleLink): Puzzle =>
-  generatePuzzle({ difficulty, falseCard, size, seed, clueRange: null });
-
-function newGameState(difficulty: Difficulty, puzzle: Puzzle): Game {
-  return {
-    difficulty,
-    puzzle,
-    history: [startSnapshot(puzzle)],
-    positions: [],
-    flipped: flipsForPuzzle(puzzle.clues, puzzle.seed),
-    hintsUsed: 0,
-    suspects: noSuspects,
-  };
-}
-
-const startGame = (difficulty: Difficulty, falseCard: boolean): Game =>
-  newGameState(difficulty, generatePuzzle({ difficulty, falseCard }));
-
-const startLinkedGame = (link: PuzzleLink): Game =>
-  newGameState(link.difficulty, puzzleFromLink(link));
-
-const linkOf = (game: Game): PuzzleLink => ({
-  difficulty: game.difficulty,
-  falseCard: game.puzzle.falseClue !== null,
-  size: game.puzzle.size,
-  seed: game.puzzle.seed,
-});
-
-const sameLink = (a: PuzzleLink, b: PuzzleLink): boolean =>
-  a.difficulty === b.difficulty &&
-  a.falseCard === b.falseCard &&
-  a.size === b.size &&
-  a.seed === b.seed;
-
-/**
- * A puzzle named in the address resumes the saved game when it is the same
- * puzzle, and otherwise starts afresh, replacing the saved one.
- */
-function initialGame(): Game {
-  const link = parsePuzzleHash(window.location.hash);
-  const saved = loadGame();
-  if (!link) return saved ?? startGame("medium", false);
-  return saved && sameLink(linkOf(saved), link) ? saved : startLinkedGame(link);
-}
-
-/** A puzzle is fully determined by its seed and difficulty, so only those are stored. */
-function loadGame(): Game | null {
-  try {
-    const current = localStorage.getItem(STORAGE_KEY);
-    const legacy = current ? null : localStorage.getItem(LEGACY_STORAGE_KEY);
-    const raw = current ?? legacy;
-    if (!raw) return null;
-    const saved = JSON.parse(raw) as Saved;
-    if (!DIFFICULTIES.includes(saved.difficulty)) return null;
-    if (legacy && saved.difficulty !== "hard") return null;
-    const puzzle = puzzleFromLink({ ...saved, falseCard: saved.falseCard ?? false });
-    if (!Array.isArray(saved.history) || saved.history.length === 0) return null;
-    if (saved.history.some((state) => !state?.cells || !state?.placed)) return null;
-    if (saved.history.some((state) => state.used?.length !== puzzle.clues.length)) return null;
-    return {
-      difficulty: saved.difficulty,
-      puzzle,
-      history: saved.history.map(({ cells, placed, used }) => ({
-        board: { size: saved.size, cells, placed },
-        used,
-      })),
-      positions: saved.positions,
-      // Saves written before cards could be turned round have no orientations,
-      // so the puzzle's own are used and the game carries on.
-      flipped:
-        saved.flipped?.length === puzzle.clues.length
-          ? saved.flipped
-          : flipsForPuzzle(puzzle.clues, puzzle.seed),
-      hintsUsed: typeof saved.hintsUsed === "number" ? saved.hintsUsed : 0,
-      suspects: restoreSuspects(saved.suspects, puzzle.clues.length),
-    };
-  } catch {
-    return null;
-  }
-}
+const initialGame = (): Game => resumeOrStart(parsePuzzleHash(window.location.hash), loadGame());
 
 export default function App() {
   const [game, setGame] = useState<Game>(initialGame);
   const [hint, setHint] = useState<Hint | null>(null);
   /** Advances on each Hint press so repeats move through the rest. */
   const [hintCursor, setHintCursor] = useState(0);
-  const [noticeVisible, setNoticeVisible] = useState(false);
-  /**
-   * Shows the notice outright instead of fading it in. Shortening the fade is
-   * not enough: once the transition is running, changing its duration does not
-   * disturb it, because opacity is already headed for the same value.
-   */
-  const [noticeRevealed, setNoticeRevealed] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const closeHelp = useCallback(() => setShowHelp(false), []);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  const { board, used } = game.history[game.history.length - 1];
+  const { puzzle, difficulty } = game;
+  const { board, used } = currentSnapshot(game);
+  const falseCard = puzzle.falseClue !== null;
   const { peekTile, hoverTile } = usePeek();
   const peeked = useMemo(
-    () => new Set(peekTile ? cluesMentioning(game.puzzle.clues, peekTile) : []),
-    [game.puzzle.clues, peekTile],
+    () => new Set(peekTile ? cluesMentioning(puzzle.clues, peekTile) : []),
+    [puzzle.clues, peekTile],
   );
-  const solved = useMemo(() => isSolved(board, game.puzzle.solution), [board, game.puzzle]);
+  const solved = useMemo(() => isSolved(board, puzzle.solution), [board, puzzle]);
   const complete = useMemo(() => isComplete(board), [board]);
   const [celebrating, setCelebrating] = useState(false);
   // Starts at the loaded game's state, so reopening a finished puzzle does not
   // celebrate it again.
   const solvedBefore = useRef(solved);
-  const stats = useMemo(() => puzzleStats(game.puzzle), [game.puzzle]);
+  const stats = useMemo(() => puzzleStats(puzzle), [puzzle]);
   const brokenIndex = useMemo(
-    () => firstBrokenIndex(game.history, game.puzzle.solution),
-    [game.history, game.puzzle],
+    () => firstBrokenIndex(game.history, puzzle.solution),
+    [game.history, puzzle],
   );
-  const wrongAccusation = isWrongAccusation(game.suspects, game.puzzle.falseClue);
-  // The cards of the smallest contradicting group, which Hint holds back until
-  // the false card has been accused. The generator kept it within the
-  // difficulty's limit, so searching up to that size finds it.
-  const { puzzle, difficulty } = game;
-  const conflictGroup = useMemo(() => {
-    if (puzzle.falseClue === null) return [];
-    const limit = DIFFICULTY_PRESETS[difficulty].falseGroup;
-    return (
-      smallestConflict(puzzle.clues, puzzle.falseClue, puzzle.size, puzzle.exclusions, limit) ?? [
-        puzzle.falseClue,
-      ]
-    );
-  }, [puzzle, difficulty]);
+  const group = useMemo(() => conflictGroup(puzzle, difficulty), [puzzle, difficulty]);
   // Accusing a true card is a mistake in the same way as ruling out a symbol
   // that belongs, so it brings up the same notice, after the same wait.
-  const warnWrongTurn = brokenIndex >= 0 || wrongAccusation;
-
-  const revealNotice = useCallback(() => setNoticeRevealed(true), []);
-  const noticeShown = warnWrongTurn && (noticeRevealed || noticeVisible);
+  const wrongTurn = brokenIndex >= 0 || isWrongAccusation(game.suspects, puzzle.falseClue);
+  // A grid that is full but wrong cannot be worked on any further, so there is
+  // nothing left to protect the player from: the notice comes up at once rather
+  // than after the wait.
+  const notice = useWrongTurnNotice(wrongTurn, complete && brokenIndex >= 0);
 
   useEffect(() => {
     if (solved && !solvedBefore.current) setCelebrating(true);
     solvedBefore.current = solved;
   }, [solved]);
-
-  // A grid that is full but wrong cannot be worked on any further, so there is
-  // nothing left to protect the player from: the notice comes up at once rather
-  // than creeping in over the next few moves.
-  useEffect(() => {
-    if (!complete || brokenIndex < 0) return;
-    revealNotice();
-  }, [complete, brokenIndex, revealNotice]);
-
-  // Once nothing is wrong any more, the notice forgets it was ever revealed.
-  useEffect(() => {
-    if (!warnWrongTurn) setNoticeRevealed(false);
-  }, [warnWrongTurn]);
-
-  // Starts the fade once the grid has been wrong for `NOTICE_DELAY_MS`. Only a
-  // grid put right cancels the timer; further moves on a broken grid neither
-  // restart the wait nor shorten it.
-  useEffect(() => {
-    if (!warnWrongTurn) {
-      setNoticeVisible(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setNoticeVisible(true), NOTICE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [warnWrongTurn]);
 
   useEffect(() => {
     if (!hint) return;
@@ -296,36 +108,10 @@ export default function App() {
   // puzzle arrives with no saved arrangement.
   useEffect(() => {
     if (canvasWidth <= 0) return;
-    setGame((current) =>
-      current.positions.length === current.puzzle.clues.length
-        ? current
-        : { ...current, positions: layoutCluesByKind(current.puzzle.clues, canvasWidth) },
-    );
+    setGame((current) => withLayout(current, canvasWidth));
   }, [canvasWidth, game.puzzle]);
 
-  useEffect(() => {
-    if (game.positions.length !== game.puzzle.clues.length) return;
-    const saved: Saved = {
-      difficulty: game.difficulty,
-      falseCard: game.puzzle.falseClue !== null,
-      seed: game.puzzle.seed,
-      size: game.puzzle.size,
-      history: game.history.map(({ board: { cells, placed }, used }) => ({ cells, placed, used })),
-      positions: game.positions,
-      flipped: game.flipped,
-      hintsUsed: game.hintsUsed,
-      suspects: game.suspects,
-    };
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-      // Removed here rather than when it is read: the read happens in a state
-      // initialiser, which React may call twice, and the second call would
-      // find the save already gone.
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
-    } catch {
-      // A full or blocked store just means the game is not resumable.
-    }
-  }, [game]);
+  useEffect(() => storeGame(game), [game]);
 
   // The address always names the puzzle on screen, so it can be copied and
   // shared at any point. Replacing the entry rather than pushing one keeps Back
@@ -349,56 +135,29 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  const pushBoard = useCallback((next: BoardState) => {
-    setHint(null);
-    setHintCursor(0);
-    setGame((current) => {
-      const last = current.history[current.history.length - 1];
-      return next === last.board
-        ? current
-        : { ...current, history: [...current.history, { board: next, used: last.used }] };
-    });
-  }, []);
-
-  const handlePlace = (row: number, col: number, tile: number) =>
-    pushBoard(placeTile(board, row, col, tile));
-  const handleRuleOut = (row: number, col: number, tile: number) =>
-    pushBoard(removeCandidate(board, row, col, tile));
-
-  const undo = () =>
-    setGame((current) =>
-      current.history.length < 2
-        ? current
-        : { ...current, history: current.history.slice(0, -1) },
-    );
-
   const clearNotices = () => {
     setHint(null);
     setHintCursor(0);
   };
 
-  const countHint = () =>
-    setGame((current) => ({ ...current, hintsUsed: current.hintsUsed + 1 }));
+  const playBoard = (next: BoardState) => {
+    clearNotices();
+    setGame((current) => pushBoard(current, next));
+  };
 
-  const falseCard = game.puzzle.falseClue !== null;
+  const handlePlace = (row: number, col: number, tile: number) =>
+    playBoard(placeTile(board, row, col, tile));
+  const handleRuleOut = (row: number, col: number, tile: number) =>
+    playBoard(removeCandidate(board, row, col, tile));
+
   const newGame = (difficulty: Difficulty, falseCard: boolean) => {
     clearNotices();
     setGame(startGame(difficulty, falseCard));
   };
 
-  /**
-   * Drops every board built on top of the wrong move, and withdraws an
-   * accusation of a true card. It tells the player where they went wrong, so it
-   * counts as a hint.
-   */
-  const rewind = () => {
+  const goBack = () => {
     clearNotices();
-    setGame((current) => ({
-      ...current,
-      history: rewindToLastGood(current.history, current.puzzle.solution),
-      suspects: withdrawWrongAccusation(current.suspects, current.puzzle.falseClue),
-      hintsUsed: current.hintsUsed + 1,
-    }));
+    setGame(rewind);
   };
 
   /**
@@ -414,26 +173,15 @@ export default function App() {
    * made.
    */
   const showHint = () => {
-    if (warnWrongTurn) {
-      countHint();
-      revealNotice();
+    if (wrongTurn) {
+      setGame(countHint);
+      notice.reveal();
       return;
     }
-    const { clues, falseClue } = game.puzzle;
-    const hints =
-      falseClue === null
-        ? findHints(board, clues, used)
-        : findFalseCardHints(
-            board,
-            clues,
-            used,
-            falseClue,
-            conflictGroup,
-            game.suspects.accused === falseClue,
-          );
+    const hints = hintsFor(game, group);
     // Nothing to show, as on a solved grid, so nothing to count.
     if (hints.length === 0) return;
-    countHint();
+    setGame(countHint);
     const pick = hints[hintCursor % hints.length];
     setHintCursor((cursor) => cursor + 1);
     // Cleared first so that ringing the same target twice restarts its animation.
@@ -443,111 +191,48 @@ export default function App() {
 
   const stopCelebrating = useCallback(() => setCelebrating(false), []);
 
-  const suspectClues = useCallback((indices: number[]) => {
-    setGame((current) => ({ ...current, suspects: addSuspects(current.suspects, indices) }));
-  }, []);
+  const suspectClues = useCallback(
+    (indices: number[]) => setGame((current) => suspectCards(current, indices)),
+    [],
+  );
+  const clearSuspectClue = useCallback(
+    (index: number, point: Point) => setGame((current) => unsuspectCard(current, index, point)),
+    [],
+  );
+  const accuseClue = useCallback(
+    (index: number) => setGame((current) => accuseCard(current, index)),
+    [],
+  );
+  const moveClue = useCallback(
+    (moves: Array<{ index: number; point: Point }>) =>
+      setGame((current) => moveCards(current, moves)),
+    [],
+  );
+  const flipClues = useCallback(
+    (indices: number[]) => setGame((current) => flipCards(current, indices)),
+    [],
+  );
+  const toggleUsedClue = useCallback(
+    (index: number) => setGame((current) => toggleUsed(current, index)),
+    [],
+  );
 
-  const clearSuspectClue = useCallback((index: number, point: Point) => {
-    setGame((current) => {
-      const positions = current.positions.slice();
-      positions[index] = point;
-      return { ...current, positions, suspects: clearSuspect(current.suspects, index) };
-    });
-  }, []);
-
-  const accuseClue = useCallback((index: number) => {
-    setGame((current) => ({ ...current, suspects: accuse(current.suspects, index) }));
-  }, []);
-
-  const falseClue = game.puzzle.falseClue;
-  const outcome = falseClue === null ? null : verdict(game.suspects, falseClue);
-
-  const moveClue = useCallback((moves: Array<{ index: number; point: Point }>) => {
-    setGame((current) => {
-      const positions = current.positions.slice();
-      for (const { index, point } of moves) positions[index] = point;
-      return { ...current, positions };
-    });
-  }, []);
-
-  /**
-   * Turns cards round, which is a change to the canvas rather than to the game,
-   * so it stays off the history the way moving a card does.
-   */
-  const flipClues = useCallback((indices: number[]) => {
-    setGame((current) => {
-      const flipped = current.flipped.slice();
-      for (const index of indices) flipped[index] = !flipped[index];
-      return { ...current, flipped };
-    });
-  }, []);
-
-  /**
-   * Greying a clue out is a step of the game, so it goes onto the history on top
-   * of the board it was decided against. Undo and "Go back" then restore which
-   * clues were still in play as well as the grid.
-   */
-  const toggleUsed = useCallback((index: number) => {
-    setGame((current) => {
-      const last = current.history[current.history.length - 1];
-      const used = last.used.slice();
-      used[index] = !used[index];
-      return { ...current, history: [...current.history, { board: last.board, used }] };
-    });
-  }, []);
+  const outcome = puzzle.falseClue === null ? null : verdict(game.suspects, puzzle.falseClue);
 
   return (
     <div className="flex h-full flex-col bg-slate-50 text-slate-800">
-      <header className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2">
-        <h1 className="mr-2 text-lg font-semibold tracking-tight">Sherlock</h1>
-
-        <select
-          className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
-          value={game.difficulty}
-          onChange={(event) => newGame(event.target.value as Difficulty, falseCard)}
-        >
-          {DIFFICULTIES.map((difficulty) => (
-            <option key={difficulty} value={difficulty}>
-              {difficulty}
-            </option>
-          ))}
-        </select>
-
-        <label
-          className="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
-          title="One card is false. Find it, and solve the grid from the rest."
-        >
-          <input
-            type="checkbox"
-            checked={falseCard}
-            onChange={(event) => newGame(game.difficulty, event.target.checked)}
-          />
-          False card
-        </label>
-
-        <Button onClick={() => newGame(game.difficulty, falseCard)}>New puzzle</Button>
-        <Button onClick={undo} disabled={game.history.length < 2}>
-          Undo
-        </Button>
-        <Button
-          onClick={showHint}
-          title={`Hints used on this puzzle, Go back included: ${game.hintsUsed}`}
-        >
-          Hint
-          {game.hintsUsed > 0 && (
-            <span data-hints-used className="ml-1.5 tabular-nums text-amber-700">
-              ×{game.hintsUsed}
-            </span>
-          )}
-        </Button>
-
-        <div className="ml-auto flex items-center gap-3 text-xs text-slate-500">
-          <span>
-            {stats.clueCount} clues{falseCard ? ", one false" : ""} · seed {game.puzzle.seed}
-          </span>
-          <Button onClick={() => setShowHelp(true)}>Help</Button>
-        </div>
-      </header>
+      <Toolbar
+        difficulty={difficulty}
+        falseCard={falseCard}
+        onNewGame={newGame}
+        canUndo={game.history.length >= 2}
+        onUndo={() => setGame(undo)}
+        onHint={showHint}
+        hintsUsed={game.hintsUsed}
+        clueCount={stats.clueCount}
+        seed={puzzle.seed}
+        onHelp={() => setShowHelp(true)}
+      />
 
       <HelpDialog open={showHelp} onClose={closeHelp} />
 
@@ -557,7 +242,7 @@ export default function App() {
             <Board
               board={board}
               highlight={hint?.kind === "cell" ? hint : null}
-              markedExclusions={falseCard ? game.puzzle.exclusions : []}
+              markedExclusions={falseCard ? puzzle.exclusions : []}
               onPlace={handlePlace}
               onRuleOut={handleRuleOut}
               onHoverTile={hoverTile}
@@ -581,44 +266,19 @@ export default function App() {
             />
           )}
 
-          {/*
-            The notice is always in the document and only its opacity changes.
-            Mounting it on the wrong move would resize the column and announce
-            itself a beat before the text became readable.
-          */}
-          <div
-            className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-            style={{
-              opacity: noticeShown ? 1 : 0,
-              // Hidden rather than only transparent during the wait, so its
-              // Go back button cannot be clicked before it can be seen.
-              visibility: noticeShown ? "visible" : "hidden",
-              // No transition on the way out, so a grid put right and then
-              // broken again starts its fade from zero rather than part-way up.
-              transition:
-                noticeRevealed || !noticeShown ? "none" : `opacity ${NOTICE_FADE_SECONDS}s linear`,
-            }}
-            aria-hidden={!noticeShown}
-          >
-            {/* The same words whatever went wrong, the grid or an accusation, so
-                that the notice says only that something did. */}
-            <span>Something has gone wrong.</span>
-            <Button onClick={rewind} title={REWIND_HINT}>
-              Go back
-            </Button>
-          </div>
+          <WrongTurnNotice shown={notice.shown} revealed={notice.revealed} onRewind={goBack} />
         </section>
 
         <section ref={canvasRef} className="min-h-[320px] min-w-0 flex-1">
           <ClueCanvas
-            key={game.puzzle.seed}
-            clues={game.puzzle.clues}
-            size={game.puzzle.size}
+            key={puzzle.seed}
+            clues={puzzle.clues}
+            size={puzzle.size}
             positions={game.positions}
             used={used}
             flipped={game.flipped}
             onMove={moveClue}
-            onToggleUsed={toggleUsed}
+            onToggleUsed={toggleUsedClue}
             onFlip={flipClues}
             suspects={falseCard ? game.suspects : null}
             onSuspect={suspectClues}
@@ -631,36 +291,12 @@ export default function App() {
                   ? hint.clueIndices
                   : NO_CARDS
             }
-            revealedFalse={solved ? game.puzzle.falseClue : null}
+            revealedFalse={solved ? puzzle.falseClue : null}
             peeked={peeked}
             onHoverTile={hoverTile}
           />
         </section>
       </main>
     </div>
-  );
-}
-
-function Button({
-  children,
-  onClick,
-  disabled,
-  title,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="rounded border border-slate-300 bg-white px-2.5 py-1 text-sm text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      {children}
-    </button>
   );
 }
