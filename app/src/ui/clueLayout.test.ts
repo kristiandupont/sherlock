@@ -9,6 +9,7 @@ import {
   describeClue,
   fitZoom,
   flipAxis,
+  flippable,
   flipsForPuzzle,
   layoutCluesByKind,
   randomFlips,
@@ -185,6 +186,12 @@ describe("flipAxis", () => {
       .filter((clue) => flipAxis(clue) === "horizontal")
       .map((c) => c.kind);
     expect(horizontal.sort()).toEqual(["adjacent", "apart", "between", "next-to-either"]);
+  });
+
+  it("keeps the cards that can be mirrored, in the order given, and no missing ones", () => {
+    const leftOf = everyKind.find((clue) => clue.kind === "left-of")!;
+    const adjacent = everyKind.find((clue) => clue.kind === "adjacent")!;
+    expect(flippable([leftOf, adjacent, adjacent], [2, 0, 1, 5])).toEqual([2, 1]);
   });
 });
 

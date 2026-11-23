@@ -68,6 +68,14 @@ export function flipAxis(clue: Clue): "horizontal" | "vertical" | null {
 export const canFlip = (clue: Clue): boolean => flipAxis(clue) !== null;
 
 /**
+ * The cards among `indices` that can be mirrored, in the same order. Cards
+ * whose meaning is a direction are dropped rather than left saying the
+ * opposite.
+ */
+export const flippable = (clues: Clue[], indices: number[]): number[] =>
+  indices.filter((index) => clues[index] !== undefined && canFlip(clues[index]));
+
+/**
  * A starting orientation for each card, mirrored or not at random, so that a
  * kind of card does not always look the same.
  *
