@@ -115,19 +115,29 @@ they can be told apart from the player's own eliminations.
 
 The generator builds a normal minimal puzzle, then adds a false card taken
 from a near miss of the solution (two tiles of one row swapped), so it looks
-like the rest. It requires that:
+like the rest. It accepts the puzzle only if it is fair (`falseCardIsFair`):
 
-- without the false card, the other cards solve the grid; and
-- supposing any other card were the false one leads to a contradiction under
-  propagation, so exactly one card can be the false one.
+- without the false card, the other cards solve the grid;
+- some group of at most `falseGroup` cards cannot all be true (2 on easy, 3 on
+  medium, 4 on hard); and
+- for every smallest such group, trusting the cards outside it and propagating
+  gives a grid that the false card contradicts on its own.
 
-Every contradicting group of cards contains the false card, since the true
-cards all hold for the solution. The difficulty's `falseGroup` limits the
-smallest such group (2 on easy, 3 on medium, 4 on hard), so the player can
-find the false card by looking for a few cards that conflict, rather than
-testing every card in turn. Where a card in that group cannot be ruled out by
-the rest, true cards are added from the pool, and the result is minimised again
-under both conditions.
+Every contradicting group contains the false card, since the true cards all
+hold for the solution, so finding one clears every card outside it. The third
+condition is what lets the player settle which card in the group is false
+without supposing anything: they work the grid with the trusted cards, then hold
+each suspect up against it, and only the false one does not fit. An earlier
+version only required that supposing any other card false would eventually lead
+to a contradiction, which in practice could mean playing most of the puzzle
+under that supposition. Where the trusted cards do not narrow the grid enough,
+true cards are added from the pool, and the result is minimised again under the
+same condition.
+
+The group search is exhaustive and is most of the cost: generation takes about
+0.15–0.5 s on average (hard is the slowest, up to about 1.7 s), compared with a
+few milliseconds for a normal puzzle. It runs on the main thread, so the page
+pauses while a false-card puzzle is built.
 
 Below the canvas, a Suspects strip holds the cards the player doubts. Cards are
 dragged in and out of it, and right-clicking one there accuses it (one at a
@@ -144,8 +154,7 @@ every card of the smallest contradicting group, since with two suspects left,
 pointing at one names the other; when only those cards are left to work with,
 the hint rings the group together (`findFalseCardHints`). The false card is
 marked once the grid is solved. These puzzles have about 24 cards whatever the
-difficulty, so the clue-count range is not applied, and generation takes about
-0.2–0.4 s, compared with a few milliseconds for a normal puzzle.
+difficulty, so the clue-count range is not applied.
 
 ## The tiles
 

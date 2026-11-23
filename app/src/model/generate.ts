@@ -318,16 +318,16 @@ const FALSE_CARD_ATTEMPTS = 40;
  * is drawn in proportion to the difficulty's pool caps, so the false card is no
  * more likely to be a rare kind than any other card.
  */
-export function falseCandidates(
+export function* falseCandidates(
   solution: Solution,
   caps: CluePoolCaps,
-  count: number,
   rng: Rng,
   allowSameRow: boolean,
-): Clue[] {
+): Generator<Clue> {
   const size = solution.length;
-  const out: Clue[] = [];
-  for (let attempt = 0; out.length < count && attempt < count * 4; attempt++) {
+  // Made one at a time, as the generator asks for them: building each takes
+  // every clue of a whole grid, and the first few usually suffice.
+  for (;;) {
     const row = Math.floor(rng() * size);
     const [x, y] = shuffle(
       Array.from({ length: size }, (_, i) => i),
@@ -347,9 +347,8 @@ export function falseCandidates(
     let pick = rng() * total;
     const kind = kinds.find((k) => (pick -= caps[k]) < 0) ?? kinds[kinds.length - 1];
     const ofKind = byKind.get(kind)!;
-    out.push(ofKind[Math.floor(rng() * ofKind.length)]);
+    yield ofKind[Math.floor(rng() * ofKind.length)];
   }
-  return out;
 }
 
 /** Builds exactly one puzzle from `seed`, with no retries. */
@@ -384,7 +383,7 @@ function buildPuzzle(
     return { size, solution, clues: shuffle(clues, rng), exclusions, falseClue: null, seed };
   }
 
-  const candidates = falseCandidates(solution, caps, FALSE_CARD_ATTEMPTS, rng, allowSameRow);
+  const candidates = falseCandidates(solution, caps, rng, allowSameRow);
   const setup = addFalseCard(minimal, exclusions, candidates, pool, size, rng, {
     maxGroup: falseGroup,
     attempts: FALSE_CARD_ATTEMPTS,

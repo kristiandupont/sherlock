@@ -77,10 +77,10 @@ export function Legend() {
         </p>
         <p>
           Look for a few cards that cannot all be true at once. The false card is among them, and
-          every card outside that group can be trusted. Then work out which card in the group is
-          the false one. It can still be worked out without guessing. Hint never points at a
-          single card of that group until you have accused the right one; when nothing else is
-          left, it rings the whole group.
+          every card outside that group can be trusted. Work the grid as far as the trusted cards
+          take you, then check each card of the group against it: the false one is the only one
+          that does not fit. Hint never points at a single card of that group until you have
+          accused the right one; when nothing else is left, it rings the whole group.
         </p>
         <p>
           Drag cards you doubt into the Suspects strip below the canvas, and drag them back out

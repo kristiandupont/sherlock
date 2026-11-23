@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { falseCardIsDeducible, smallestConflict } from "./falseCard";
+import {
+  conflictGroups,
+  falseCardIsDeducible,
+  falseCardIsFair,
+  falseCardStandsOut,
+  smallestConflict,
+  trustedGrid,
+} from "./falseCard";
 import { DIFFICULTY_PRESETS, generatePuzzle, type Difficulty } from "./generate";
-import { clueHolds, countSolutions } from "./solver";
+import { clueHolds, countSolutions, propagate } from "./solver";
 import type { Clue, Puzzle } from "./types";
 
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
@@ -53,17 +60,44 @@ describe("false-card puzzles", () => {
     }
   });
 
-  it("have no card that could be dropped while the puzzle still works", () => {
-    const [where, , puzzle] = puzzles[2];
+  it("let the false card be found without supposing anything", () => {
+    // Whichever smallest group the player finds: trusting every card outside
+    // it gives a grid that the false card contradicts on its own, while each
+    // other card of the group still fits.
+    for (const [where, difficulty, puzzle] of puzzles) {
+      const { clues, falseClue, size, exclusions } = puzzle;
+      const groups = conflictGroups(
+        clues,
+        falseClue!,
+        size,
+        exclusions,
+        DIFFICULTY_PRESETS[difficulty].falseGroup,
+      );
+      expect(groups.length, where).toBeGreaterThan(0);
+      for (const group of groups) {
+        const grid = trustedGrid(clues, group, size, exclusions)!;
+        expect(grid, where).not.toBeNull();
+        for (const index of group) {
+          const fits = propagate(Int32Array.from(grid), [clues[index]], size).ok;
+          expect(fits, `${where}, card ${index} of group ${group}`).toBe(index !== falseClue);
+        }
+        expect(falseCardStandsOut(clues, falseClue!, group, size, exclusions), where).toBe(true);
+      }
+    }
+  });
+
+  it("have no card that could be dropped while the puzzle stays fair", () => {
+    const [where, difficulty, puzzle] = puzzles[2];
     const falseIndex = puzzle.falseClue!;
+    const maxGroup = DIFFICULTY_PRESETS[difficulty].falseGroup;
     for (let i = 0; i < puzzle.clues.length; i++) {
       if (i === falseIndex) continue;
       const fewer = withoutIndex(puzzle.clues, i);
       const shifted = i < falseIndex ? falseIndex - 1 : falseIndex;
       expect(
-        falseCardIsDeducible(fewer, shifted, puzzle.size, puzzle.exclusions),
+        falseCardIsFair(fewer, shifted, puzzle.size, puzzle.exclusions, maxGroup),
         `${where}, card ${i} was removable`,
-      ).toBe(false);
+      ).toBeNull();
     }
   });
 
